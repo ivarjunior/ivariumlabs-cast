@@ -1,0 +1,223 @@
+{
+  "show": {
+    "title": "IvariumLabs Cast",
+    "tagline": "Audio en videocasts vanuit één release cockpit.",
+    "description": "Een feed-first podcastsysteem voor gesprekken, behind-the-scenes afleveringen en video-first distributie vanuit één centrale release.",
+    "language": "nl-nl",
+    "category": "Technology",
+    "author": "Ivar van Teijlingen",
+    "ownerName": "Ivar van Teijlingen",
+    "ownerEmail": "podcast@ivariumlabs.com",
+    "explicit": false,
+    "artworkPath": "/cast-artwork.svg",
+    "sitePath": "/studio",
+    "feedPath": "/feed.xml"
+  },
+  "publishedEpisodes": [
+    {
+      "id": "episode-014",
+      "slug": "episode-014-feed-first-publishing",
+      "title": "Episode 014: Feed-first publishing zonder distributie-chaos",
+      "summary": "Waarom een centrale release-laag de basis is voor podcasts, videocasts en clips.",
+      "description": "In deze aflevering wordt de architectuur uitgelegd waarmee audio, video en clips vanuit één release record gepubliceerd kunnen worden.",
+      "publishedAt": "2026-03-29T08:00:00.000Z",
+      "duration": "00:41:28",
+      "audioPath": "/media/episode-014.mp3",
+      "audioBytes": 58200000,
+      "audioMimeType": "audio/mpeg",
+      "artworkPath": "/cast-artwork.svg",
+      "seasonNumber": 1,
+      "episodeNumber": 14,
+      "explicit": false,
+      "status": "published",
+      "distribution": [
+        {
+          "targetId": "spotify",
+          "state": "live",
+          "note": "Audio live via feed, video gepland in creator dashboard."
+        },
+        {
+          "targetId": "apple",
+          "state": "live",
+          "note": "Metadata en enclosure gevalideerd."
+        },
+        {
+          "targetId": "pocketcasts",
+          "state": "live",
+          "note": "Automatisch opgepikt vanuit feed."
+        },
+        {
+          "targetId": "overcast",
+          "state": "review",
+          "note": "Controle op artwork-resolutie loopt nog."
+        },
+        {
+          "targetId": "youtube",
+          "state": "manual",
+          "note": "Thumbnail en chapters nog handmatig afronden."
+        }
+      ]
+    },
+    {
+      "id": "episode-013",
+      "slug": "episode-013-video-cast-workflow",
+      "title": "Episode 013: Van audio release naar volledige videocast workflow",
+      "summary": "Hoe je één opnamepakket splitst naar audiofeed, full video en korte clips.",
+      "description": "Een praktische aflevering over masterbestanden, clip-export en platform-specifieke publicatiepaden.",
+      "publishedAt": "2026-03-22T08:00:00.000Z",
+      "duration": "00:37:05",
+      "audioPath": "/media/episode-013.mp3",
+      "audioBytes": 52100000,
+      "audioMimeType": "audio/mpeg",
+      "artworkPath": "/cast-artwork.svg",
+      "seasonNumber": 1,
+      "episodeNumber": 13,
+      "explicit": false,
+      "status": "published",
+      "distribution": [
+        {
+          "targetId": "spotify",
+          "state": "live",
+          "note": "Audio release staat live."
+        },
+        {
+          "targetId": "apple",
+          "state": "live",
+          "note": "Feed heeft Apple Podcasts ingest gehaald."
+        },
+        {
+          "targetId": "youtube",
+          "state": "live",
+          "note": "Videocast gepubliceerd met chapter markers."
+        },
+        {
+          "targetId": "clips",
+          "state": "queued",
+          "note": "Vertical snippets wachten op export."
+        }
+      ]
+    },
+    {
+      "id": "episode-012",
+      "slug": "episode-012-show-metadata",
+      "title": "Episode 012: Show metadata die je feed wel of niet redt",
+      "summary": "Een technische walkthrough van cover art, eigenaar-info, categorieën en episode tagging.",
+      "description": "Deze aflevering laat zien welke metadata nodig is om een podcastfeed technisch en redactioneel goed neer te zetten.",
+      "publishedAt": "2026-03-15T08:00:00.000Z",
+      "duration": "00:33:44",
+      "audioPath": "/media/episode-012.mp3",
+      "audioBytes": 47700000,
+      "audioMimeType": "audio/mpeg",
+      "artworkPath": "/cast-artwork.svg",
+      "seasonNumber": 1,
+      "episodeNumber": 12,
+      "explicit": false,
+      "status": "published",
+      "distribution": [
+        {
+          "targetId": "spotify",
+          "state": "live",
+          "note": "Show metadata is gesynchroniseerd."
+        },
+        {
+          "targetId": "apple",
+          "state": "live",
+          "note": "Categorie en author-info correct verwerkt."
+        },
+        {
+          "targetId": "overcast",
+          "state": "live",
+          "note": "Feed ingest voltooid."
+        }
+      ]
+    }
+  ],
+  "queuedReleases": [
+    {
+      "id": "release-015",
+      "slug": "episode-015-de-control-room-voor-podcast-distributie",
+      "title": "Episode 015: De control room voor podcast distributie",
+      "summary": "Een nieuwe queued release met audio, video en clip-routes vanuit dezelfde cockpit.",
+      "scheduledFor": "2026-04-09T08:00:00.000Z",
+      "createdAt": "2026-04-04T08:30:00.000Z",
+      "duration": "00:45:00",
+      "seasonNumber": 1,
+      "episodeNumber": 15,
+      "explicit": false,
+      "status": "queued",
+      "audioMasterName": "episode-015-master.wav",
+      "audioMasterPath": null,
+      "audioBytes": 0,
+      "audioMimeType": null,
+      "videoMasterName": "episode-015-master.mov",
+      "videoMasterPath": null,
+      "artworkName": "episode-015-cover.png",
+      "artworkPath": "/cast-artwork.svg",
+      "targetIds": [
+        "spotify",
+        "apple",
+        "pocketcasts",
+        "overcast",
+        "youtube",
+        "clips"
+      ]
+    }
+  ],
+  "distributionJobs": [],
+  "connectors": [
+    {
+      "targetId": "spotify",
+      "mode": "rss",
+      "readiness": "ready",
+      "accountLabel": "Primary show",
+      "destination": "feed.xml ingest",
+      "note": "Audio-publicatie loopt via de feed-first laag.",
+      "updatedAt": "2026-04-04T09:00:00.000Z"
+    },
+    {
+      "targetId": "apple",
+      "mode": "rss",
+      "readiness": "ready",
+      "accountLabel": "Apple Podcasts Connect",
+      "destination": "feed.xml ingest",
+      "note": "Apple leest de centrale podcastfeed uit.",
+      "updatedAt": "2026-04-04T09:00:00.000Z"
+    },
+    {
+      "targetId": "youtube",
+      "mode": "api",
+      "readiness": "setup",
+      "accountLabel": "",
+      "destination": "",
+      "note": "YouTube API-connector wacht nog op credentials en optionele playlistroute.",
+      "updatedAt": "2026-04-04T09:00:00.000Z"
+    },
+    {
+      "targetId": "pocketcasts",
+      "mode": "rss",
+      "readiness": "ready",
+      "accountLabel": "Directory ingest",
+      "destination": "feed.xml ingest",
+      "note": "Pocket Casts leest de publieke feed uit.",
+      "updatedAt": "2026-04-04T09:00:00.000Z"
+    },
+    {
+      "targetId": "overcast",
+      "mode": "rss",
+      "readiness": "ready",
+      "accountLabel": "Directory ingest",
+      "destination": "feed.xml ingest",
+      "note": "Overcast volgt de publieke feed.",
+      "updatedAt": "2026-04-04T09:00:00.000Z"
+    },
+    {
+      "targetId": "clips",
+      "mode": "manual",
+      "readiness": "setup",
+      "accountLabel": "",
+      "destination": "",
+      "note": "Short-form clipworkflow is nog niet gekoppeld.",
+      "updatedAt": "2026-04-04T09:00:00.000Z"
+    }
+  ]
+}
