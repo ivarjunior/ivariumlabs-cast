@@ -22,6 +22,25 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 This project does not use Vercel Cron on Hobby. Instead, trigger the worker with an external scheduler against the production deployment.
 
+### Recommended: GitHub Actions scheduler
+
+This repository now includes a scheduled workflow in `.github/workflows/distribution-worker.yml`.
+
+Setup:
+
+1. Push the repository to GitHub on the default branch.
+2. In GitHub, open `Settings -> Secrets and variables -> Actions`.
+3. Add repository secret `CAST_DISTRIBUTION_WORKER_URL` with your production endpoint, for example:
+
+```text
+https://your-domain.com/api/distribution/cron
+```
+
+4. Add repository secret `CAST_DISTRIBUTION_WORKER_SECRET` with the same value as your app environment variable.
+5. In GitHub, open `Actions -> Distribution worker` and enable the workflow if needed.
+
+The workflow runs every 10 minutes, offset from the top of the hour, and also supports manual runs through `workflow_dispatch`.
+
 Endpoint:
 
 ```text

@@ -1,0 +1,38 @@
+name: Distribution worker
+
+on:
+  schedule:
+    # Avoid the top of the hour to reduce the chance of delayed or dropped jobs.
+    - cron: "3,13,23,33,43,53 * * * *"
+  workflow_dispatch:
+
+jobs:
+  trigger-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate scheduler secrets
+        env:
+          CAST_DISTRIBUTION_WORKER_URL: ${{ secrets.CAST_DISTRIBUTION_WORKER_URL }}
+          CAST_DISTRIBUTION_WORKER_SECRET: ${{ secrets.CAST_DISTRIBUTION_WORKER_SECRET }}
+        run: |
+          if [ -z "$CAST_DISTRIBUTION_WORKER_URL" ]; then
+            echo "Missing CAST_DISTRIBUTION_WORKER_URL secret" >&2
+            exit 1
+          fi
+
+          if [ -z "$CAST_DISTRIBUTION_WORKER_SECRET" ]; then
+            echo "Missing CAST_DISTRIBUTION_WORKER_SECRET secret" >&2
+            exit 1
+          fi
+
+      - name: Trigger distribution worker
+        env:
+          CAST_DISTRIBUTION_WORKER_URL: ${{ secrets.CAST_DISTRIBUTION_WORKER_URL }}
+          CAST_DISTRIBUTION_WORKER_SECRET: ${{ secrets.CAST_DISTRIBUTION_WORKER_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $CAST_DISTRIBUTION_WORKER_SECRET" \
+            "$CAST_DISTRIBUTION_WORKER_URL"
