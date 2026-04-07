@@ -101,7 +101,7 @@ export function getDistributionWorkerStatus(): DistributionWorkerStatus {
     configured: missing.length === 0,
     batchSize: getDistributionWorkerBatchSize(),
     routePath: "/api/distribution/cron",
-    schedule: "*/10 * * * *",
+    schedule: "external scheduler",
     missing,
   };
 }

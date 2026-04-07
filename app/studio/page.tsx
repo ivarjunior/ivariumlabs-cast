@@ -300,9 +300,10 @@ export function StudioShell({
                   Pending jobs kunnen automatisch in batches worden verwerkt.
                 </h2>
                 <p className="max-w-2xl text-sm leading-6 text-foreground/68">
-                  De geplande worker gebruikt dezelfde connectorlogica als de
-                  studio. Je kunt daarnaast nog steeds handmatig een batch voor
-                  deze tenant starten.
+                  De distribution worker gebruikt dezelfde connectorlogica als
+                  de studio. Je kunt hem via een externe scheduler aanroepen en
+                  daarnaast nog steeds handmatig een batch voor deze tenant
+                  starten.
                 </p>
               </div>
 
@@ -323,7 +324,7 @@ export function StudioShell({
               </div>
               <div className="rounded-3xl border border-white/10 bg-black/18 p-4">
                 <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-accent-soft">
-                  Cadence
+                  Worker trigger
                 </p>
                 <p className="mt-3 text-sm leading-6 text-foreground/72">
                   {workerStatus.schedule} · batch {workerStatus.batchSize}
@@ -341,7 +342,7 @@ export function StudioShell({
               </button>
               <p className="text-xs leading-5 text-foreground/55">
                 Draait een handmatige batch-run voor deze tenant bovenop de
-                geplande worker.
+                externe workertrigger.
               </p>
             </form>
 

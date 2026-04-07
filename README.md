@@ -1,8 +1,10 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ivariumlabs-cast
+
+Private Next.js studio for cast releases, distribution jobs, and tenant workspaces.
 
 ## Getting Started
 
-First, run the development server:
+Run the development server:
 
 ```bash
 npm run dev
@@ -16,9 +18,39 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Distribution worker
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+This project does not use Vercel Cron on Hobby. Instead, trigger the worker with an external scheduler against the production deployment.
+
+Endpoint:
+
+```text
+POST /api/distribution/cron
+```
+
+Authentication:
+
+```text
+Authorization: Bearer <CAST_DISTRIBUTION_WORKER_SECRET>
+```
+
+Notes:
+
+- `CAST_DISTRIBUTION_WORKER_SECRET` is the preferred secret.
+- `CRON_SECRET` is still accepted as a legacy fallback.
+- `GET` also works if your scheduler cannot send `POST`.
+- Optional query params:
+  - `batch=8`
+  - `tenantSlug=demo-company`
+
+Example:
+
+```bash
+curl -X POST "https://your-domain.com/api/distribution/cron?batch=8" \
+  -H "Authorization: Bearer $CAST_DISTRIBUTION_WORKER_SECRET"
+```
+
+The worker processes pending distribution jobs in batches and returns a JSON summary of the run.
 
 ## Learn More
 
@@ -31,7 +63,6 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Deploy the app on Vercel as a normal Next.js project. No Vercel cron configuration is required on Hobby when you use an external scheduler for `/api/distribution/cron`.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# ivariumlabs-cast
