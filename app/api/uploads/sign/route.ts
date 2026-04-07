@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { CastTenantAccessError, requireTenantWorkspaceAccess } from "@/lib/cast-access";
 import { slugify } from "@/lib/cast";
 import {
+  assertCastStoreWriteReady,
+  CastStorePersistenceError,
+} from "@/lib/cast-store";
+import {
   ObjectStorageConfigurationError,
   createSignedUpload,
   type UploadKind,
@@ -96,6 +100,7 @@ export async function POST(request: Request) {
 
   try {
     await requireTenantWorkspaceAccess(tenantSlug);
+    assertCastStoreWriteReady();
 
     const uploads = await Promise.all(
       files.map((file) =>
@@ -132,6 +137,17 @@ export async function POST(request: Request) {
           status: "error",
           message: "Object storage is nog niet volledig geconfigureerd.",
           issues: error.missing.map((item) => `Ontbreekt: ${item}`),
+        },
+        { status: 503 },
+      );
+    }
+
+    if (error instanceof CastStorePersistenceError) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "De castmetadata-opslag is niet klaar voor deze omgeving.",
+          issues: error.issues,
         },
         { status: 503 },
       );

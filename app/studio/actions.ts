@@ -24,7 +24,12 @@ import {
   requireTenantWorkspaceAccess,
   revokeTenantAccess,
 } from "@/lib/cast-access";
-import { getTenantWorkspace, saveTenantWorkspace } from "@/lib/cast-store";
+import {
+  assertCastStoreWriteReady,
+  CastStorePersistenceError,
+  getTenantWorkspace,
+  saveTenantWorkspace,
+} from "@/lib/cast-store";
 import {
   processPendingDistributionJobs,
   runDistributionJobForTenant,
@@ -247,15 +252,22 @@ export async function createReleaseDraft(
 
   try {
     workspace = await requireTenantWorkspaceAccess(tenantSlug);
+    assertCastStoreWriteReady();
   } catch (error) {
     return {
       status: "error",
-      message: "Geen toegang tot deze castworkspace.",
-      issues: [
-        error instanceof Error
-          ? error.message
-          : "De tenanttoegang kon niet worden bevestigd.",
-      ],
+      message:
+        error instanceof CastStorePersistenceError
+          ? "De metadata-opslag is niet goed geconfigureerd voor deze omgeving."
+          : "Geen toegang tot deze castworkspace.",
+      issues:
+        error instanceof CastStorePersistenceError
+          ? error.issues
+          : [
+              error instanceof Error
+                ? error.message
+                : "De tenanttoegang kon niet worden bevestigd.",
+            ],
       preview: null,
     };
   }
@@ -351,7 +363,29 @@ export async function createReleaseDraft(
     queuedReleases: [...store.queuedReleases, queuedRelease],
   };
 
-  await saveTenantWorkspace(nextWorkspace);
+  try {
+    await saveTenantWorkspace(nextWorkspace);
+  } catch (error) {
+    if (error instanceof CastStorePersistenceError) {
+      return {
+        status: "error",
+        message: "De releasemetadata kon niet op Vercel worden opgeslagen.",
+        issues: error.issues,
+        preview: null,
+      };
+    }
+
+    return {
+      status: "error",
+      message: "De releasemetadata kon niet worden opgeslagen.",
+      issues: [
+        error instanceof Error
+          ? error.message
+          : "Onbekende fout tijdens het opslaan van de release.",
+      ],
+      preview: null,
+    };
+  }
   revalidatePath("/");
   revalidatePath(`/studio/${workspace.tenant.slug}`);
 

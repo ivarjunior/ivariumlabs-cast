@@ -69,6 +69,63 @@ type SanityMutationResult = {
   results?: Array<{ id?: string }>;
 };
 
+export type CastStorePersistenceStatus = {
+  configured: boolean;
+  mode: "sanity" | "file";
+  issues: string[];
+};
+
+export class CastStorePersistenceError extends Error {
+  readonly issues: string[];
+
+  constructor(status: CastStorePersistenceStatus) {
+    super(status.issues.join(" "));
+    this.name = "CastStorePersistenceError";
+    this.issues = status.issues;
+  }
+}
+
+function isVercelRuntime() {
+  return Boolean((process.env.VERCEL || "").trim());
+}
+
+export function getCastStorePersistenceStatus(): CastStorePersistenceStatus {
+  if (isSanityServerConfigured()) {
+    return {
+      configured: true,
+      mode: "sanity",
+      issues: [],
+    };
+  }
+
+  if (isVercelRuntime()) {
+    return {
+      configured: false,
+      mode: "file",
+      issues: [
+        "SANITY_API_TOKEN ontbreekt op Vercel.",
+        "De castmetadata kan daar niet veilig naar data/cast-store.json worden weggeschreven.",
+      ],
+    };
+  }
+
+  return {
+    configured: true,
+    mode: "file",
+    issues: [],
+  };
+}
+
+export function assertCastStoreWriteReady() {
+  const status = getCastStorePersistenceStatus();
+
+  if (!status.configured) {
+    throw new CastStorePersistenceError(status);
+  }
+
+  return status;
+}
+
 async function ensureStoreDirectory() {
   await mkdir(path.dirname(storePath), { recursive: true });
 }
@@ -407,6 +464,7 @@ export async function getCastRegistry(): Promise<CastRegistry> {
 
 export async function saveCastRegistry(registry: CastRegistry) {
   if (!isSanityServerConfigured()) {
+    assertCastStoreWriteReady();
     return saveCastRegistryToFile(registry);
   }
 
@@ -489,6 +547,7 @@ export async function getTenantWorkspaceByCompanyId(
 
 export async function saveTenantWorkspace(workspace: CastWorkspace) {
   if (!isSanityServerConfigured()) {
+    assertCastStoreWriteReady();
     const registry = await getCastRegistryFromFile();
     const nextWorkspace = normalizeCastWorkspace(workspace);
     const existingIndex = registry.tenants.findIndex(
