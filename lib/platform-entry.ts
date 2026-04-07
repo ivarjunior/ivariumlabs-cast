@@ -12,6 +12,17 @@ export type CastPlatformEntryPayload = {
   exp: number;
 };
 
+export type CastPlatformSessionPayload = {
+  companyId: string;
+  companyName: string;
+  tenantSlug: string;
+  userId: string;
+  iat: number;
+  exp: number;
+};
+
+const defaultPlatformSessionMaxAgeSeconds = 60 * 60 * 8;
+
 function toBase64Url(input: Buffer | string) {
   return Buffer.from(input)
     .toString("base64")
@@ -45,7 +56,11 @@ export function getCastPlatformEntryStatus() {
   };
 }
 
-export function verifyCastPlatformEntryToken(token: string): CastPlatformEntryPayload | null {
+function signPayload(payloadEncoded: string, secret: string) {
+  return toBase64Url(createHmac("sha256", secret).update(payloadEncoded).digest());
+}
+
+function verifySignedPayloadToken<T>(token: string, parser: (payload: unknown) => T | null): T | null {
   const secret = getCastPlatformEntrySecret();
 
   if (!secret) {
@@ -59,50 +74,102 @@ export function verifyCastPlatformEntryToken(token: string): CastPlatformEntryPa
       return null;
     }
 
-    const expectedSignature = toBase64Url(
-      createHmac("sha256", secret).update(payloadEncoded).digest(),
-    );
+    const expectedSignature = signPayload(payloadEncoded, secret);
 
     if (signature !== expectedSignature) {
       return null;
     }
 
-    const payload = JSON.parse(
-      fromBase64Url(payloadEncoded).toString("utf8"),
-    ) as Partial<CastPlatformEntryPayload>;
-    const companyId =
-      typeof payload.companyId === "string" ? payload.companyId.trim() : "";
-    const companyName =
-      typeof payload.companyName === "string" ? payload.companyName.trim() : "";
-    const tenantSlug = slugify(
-      typeof payload.tenantSlug === "string" ? payload.tenantSlug : "",
-    );
-    const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
+    const payload = JSON.parse(fromBase64Url(payloadEncoded).toString("utf8"));
 
-    if (
-      !companyId ||
-      !companyName ||
-      !tenantSlug ||
-      !userId ||
-      typeof payload.iat !== "number" ||
-      typeof payload.exp !== "number"
-    ) {
-      return null;
-    }
-
-    if (payload.exp < Math.floor(Date.now() / 1000)) {
-      return null;
-    }
-
-    return {
-      companyId,
-      companyName,
-      tenantSlug,
-      userId,
-      iat: payload.iat,
-      exp: payload.exp,
-    };
+    return parser(payload);
   } catch {
     return null;
   }
+}
+
+function parsePlatformPayload(
+  payload: unknown,
+): CastPlatformEntryPayload | CastPlatformSessionPayload | null {
+  const source = payload as Partial<CastPlatformEntryPayload>;
+  const companyId = typeof source.companyId === "string" ? source.companyId.trim() : "";
+  const companyName =
+    typeof source.companyName === "string" ? source.companyName.trim() : "";
+  const tenantSlug = slugify(
+    typeof source.tenantSlug === "string" ? source.tenantSlug : "",
+  );
+  const userId = typeof source.userId === "string" ? source.userId.trim() : "";
+
+  if (
+    !companyId ||
+    !companyName ||
+    !tenantSlug ||
+    !userId ||
+    typeof source.iat !== "number" ||
+    typeof source.exp !== "number"
+  ) {
+    return null;
+  }
+
+  if (source.exp < Math.floor(Date.now() / 1000)) {
+    return null;
+  }
+
+  return {
+    companyId,
+    companyName,
+    tenantSlug,
+    userId,
+    iat: source.iat,
+    exp: source.exp,
+  };
+}
+
+function clampPlatformSessionMaxAge(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "", 10);
+
+  if (!Number.isFinite(parsed)) {
+    return defaultPlatformSessionMaxAgeSeconds;
+  }
+
+  return Math.min(Math.max(Math.trunc(parsed), 60), 60 * 60 * 24 * 7);
+}
+
+export function getCastPlatformSessionMaxAgeSeconds() {
+  return clampPlatformSessionMaxAge(process.env.CAST_PLATFORM_SESSION_MAX_AGE);
+}
+
+export function createCastPlatformSessionToken(
+  input: Omit<CastPlatformSessionPayload, "iat" | "exp">,
+  maxAgeSeconds: number = getCastPlatformSessionMaxAgeSeconds(),
+) {
+  const secret = getCastPlatformEntrySecret();
+
+  if (!secret) {
+    throw new Error(
+      "Missing CAST_PLATFORM_ENTRY_SECRET environment variable for cast platform session.",
+    );
+  }
+
+  const iat = Math.floor(Date.now() / 1000);
+  const exp = iat + maxAgeSeconds;
+  const payload: CastPlatformSessionPayload = {
+    ...input,
+    iat,
+    exp,
+  };
+  const payloadEncoded = toBase64Url(JSON.stringify(payload));
+  const signature = signPayload(payloadEncoded, secret);
+
+  return `${payloadEncoded}.${signature}`;
+}
+
+export function verifyCastPlatformEntryToken(token: string): CastPlatformEntryPayload | null {
+  return verifySignedPayloadToken(token, (payload) => parsePlatformPayload(payload));
+}
+
+export function verifyCastPlatformSessionToken(
+  token: string,
+): CastPlatformSessionPayload | null {
+  return verifySignedPayloadToken(token, (payload) => parsePlatformPayload(payload));
 }

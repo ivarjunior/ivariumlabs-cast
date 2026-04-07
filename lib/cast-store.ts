@@ -165,7 +165,13 @@ function migrateLegacyStoreToRegistry(store: CastStore): CastRegistry {
 function sanitizePublishedEpisode(
   episode: PodcastEpisode & { _key?: string },
 ): PodcastEpisode {
-  const { _key: _ignored, distribution, ...rest } = episode;
+  const {
+    _key: _ignored,
+    distribution,
+    clipPlans,
+    renderedClips,
+    ...rest
+  } = episode;
 
   return {
     ...rest,
@@ -178,15 +184,60 @@ function sanitizePublishedEpisode(
           return distributionRest;
         })
       : [],
+    clipPlans: Array.isArray(clipPlans)
+      ? clipPlans.map((plan) => {
+          const { _key: _clipPlanKey, ...clipPlanRest } = plan as typeof plan & {
+            _key?: string;
+          };
+
+          return clipPlanRest;
+        })
+      : [],
+    renderedClips: Array.isArray(renderedClips)
+      ? renderedClips.map((clip) => {
+          const {
+            _key: _renderedClipKey,
+            exports,
+            ...renderedClipRest
+          } = clip as typeof clip & {
+            _key?: string;
+            exports?: Array<{ _key?: string }>;
+          };
+
+          return {
+            ...renderedClipRest,
+            exports: Array.isArray(exports)
+              ? exports.map((item) => {
+                  const { _key: _exportKey, ...exportRest } = item as typeof item & {
+                    _key?: string;
+                  };
+
+                  return exportRest;
+                })
+              : [],
+          };
+        })
+      : [],
   };
 }
 
 function sanitizeQueuedRelease(
   release: QueuedRelease & { _key?: string },
 ): QueuedRelease {
-  const { _key: _ignored, ...rest } = release;
+  const { _key: _ignored, clipPlans, ...rest } = release;
 
-  return rest;
+  return {
+    ...rest,
+    clipPlans: Array.isArray(clipPlans)
+      ? clipPlans.map((plan) => {
+          const { _key: _clipPlanKey, ...clipPlanRest } = plan as typeof plan & {
+            _key?: string;
+          };
+
+          return clipPlanRest;
+        })
+      : [],
+  };
 }
 
 function sanitizeDistributionJob(
@@ -279,6 +330,18 @@ function buildSanityWorkspaceDocument(workspace: CastWorkspace) {
     publishedEpisodes: normalized.publishedEpisodes.map((episode) => ({
       _key: episode.id,
       ...episode,
+      clipPlans: episode.clipPlans.map((plan) => ({
+        _key: plan.id,
+        ...plan,
+      })),
+      renderedClips: episode.renderedClips.map((clip) => ({
+        _key: clip.id,
+        ...clip,
+        exports: clip.exports.map((item, index) => ({
+          _key: `${clip.id}-${item.platform}-${index}`,
+          ...item,
+        })),
+      })),
       distribution: episode.distribution.map((item, index) => ({
         _key: `${episode.id}-${item.targetId}-${index}`,
         ...item,
@@ -287,6 +350,10 @@ function buildSanityWorkspaceDocument(workspace: CastWorkspace) {
     queuedReleases: normalized.queuedReleases.map((release) => ({
       _key: release.id,
       ...release,
+      clipPlans: release.clipPlans.map((plan) => ({
+        _key: plan.id,
+        ...plan,
+      })),
     })),
     distributionJobs: normalized.distributionJobs.map((job) => ({
       _key: job.id,

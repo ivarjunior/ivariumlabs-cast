@@ -1,7 +1,11 @@
 export type DistributionLane = "audio" | "video" | "hybrid" | "clips";
 export type DistributionState = "live" | "queued" | "review" | "manual";
 export type DistributionJobStatus = "pending" | "processing" | "completed" | "failed";
-export type DistributionJobKind = "feed-ingest" | "platform-upload" | "clip-render";
+export type DistributionJobKind =
+  | "feed-ingest"
+  | "platform-upload"
+  | "clip-render"
+  | "clip-export";
 export type DistributionJobHistoryEvent =
   | "queued"
   | "started"
@@ -13,6 +17,8 @@ export type EpisodeStatus = "published" | "queued" | "draft";
 export type ConnectorMode = "rss" | "api" | "manual";
 export type ConnectorReadiness = "ready" | "setup" | "disabled";
 export type YouTubePrivacyStatus = "private" | "unlisted" | "public";
+export type ClipPlatform = "shorts" | "reels" | "tiktok";
+export type ClipRenderTemplateId = "clean" | "bold" | "ticker";
 
 export const defaultDistributionJobMaxAttempts = 3;
 
@@ -81,6 +87,64 @@ export type PlatformConnector = {
     privacyStatus: YouTubePrivacyStatus;
     categoryId: string | null;
   } | null;
+  instagramConfig?: {
+    accessToken: string | null;
+    igUserId: string | null;
+    shareToFeed: boolean;
+    apiVersion: string | null;
+  } | null;
+  tiktokConfig?: {
+    accessToken: string | null;
+    postMode: "direct" | "inbox";
+    privacyLevel: string | null;
+    disableDuet: boolean;
+    disableComment: boolean;
+    disableStitch: boolean;
+  } | null;
+  clipRenderConfig?: {
+    defaultTemplateId: ClipRenderTemplateId;
+    brandLabel: string | null;
+  } | null;
+};
+
+export type ClipPlan = {
+  id: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  startSeconds: number;
+  endSeconds: number;
+  hook: string;
+  caption: string;
+  platforms: ClipPlatform[];
+  templateId: ClipRenderTemplateId;
+};
+
+export type RenderedClipExport = {
+  platform: ClipPlatform;
+  state: "queued" | "completed" | "failed";
+  note: string;
+  externalUrl?: string | null;
+  externalId?: string | null;
+  exportedAt?: string | null;
+};
+
+export type RenderedClip = {
+  id: string;
+  sourcePlanId: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  durationSeconds: number;
+  hook: string;
+  caption: string;
+  platforms: ClipPlatform[];
+  templateId: ClipRenderTemplateId;
+  assetPath: string;
+  assetBytes: number;
+  assetMimeType: string;
+  renderedAt: string;
+  exports: RenderedClipExport[];
 };
 
 export type PodcastEpisode = {
@@ -102,6 +166,8 @@ export type PodcastEpisode = {
   episodeNumber: number;
   explicit: boolean;
   status: EpisodeStatus;
+  clipPlans: ClipPlan[];
+  renderedClips: RenderedClip[];
   distribution: EpisodeDistribution[];
 };
 
@@ -143,6 +209,7 @@ export type QueuedRelease = {
   artworkName: string;
   artworkPath: string;
   targetIds: string[];
+  clipPlans: ClipPlan[];
 };
 
 export type CastStore = {
@@ -192,6 +259,24 @@ export const distributionTargets: DistributionTarget[] = [
     route: "Vraagt een video-upload, thumbnail en hoofdstukken.",
   },
   {
+    id: "shorts",
+    label: "YouTube Shorts",
+    lane: "clips",
+    route: "Uploadt korte vertical masters als aparte YouTube Shorts exports.",
+  },
+  {
+    id: "reels",
+    label: "Instagram Reels",
+    lane: "clips",
+    route: "Publiceert vertical clipmasters via de Instagram publishing flow.",
+  },
+  {
+    id: "tiktok",
+    label: "TikTok",
+    lane: "clips",
+    route: "Publiceert korte vertical clipmasters via de TikTok posting flow.",
+  },
+  {
     id: "pocketcasts",
     label: "Pocket Casts",
     lane: "audio",
@@ -208,6 +293,46 @@ export const distributionTargets: DistributionTarget[] = [
     label: "Short-form clips",
     lane: "clips",
     route: "Gebruikt afgeleide vertical renders voor Shorts, Reels en TikTok.",
+  },
+];
+
+export const clipPlatforms: Array<{
+  id: ClipPlatform;
+  label: string;
+}> = [
+  {
+    id: "shorts",
+    label: "YouTube Shorts",
+  },
+  {
+    id: "reels",
+    label: "Instagram Reels",
+  },
+  {
+    id: "tiktok",
+    label: "TikTok",
+  },
+];
+
+export const clipRenderTemplates: Array<{
+  id: ClipRenderTemplateId;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "clean",
+    label: "Clean",
+    description: "Rustige lower third met compacte brand-tag en subtitleblok.",
+  },
+  {
+    id: "bold",
+    label: "Bold",
+    description: "Grote hook bovenin met stevige subtitleband onderin.",
+  },
+  {
+    id: "ticker",
+    label: "Ticker",
+    description: "Horizontale brandbar bovenin en subtitelstrook in newsroom-stijl.",
   },
 ];
 
@@ -271,6 +396,16 @@ function sanitizeYouTubePrivacyStatus(value: string | null | undefined): YouTube
   return "private";
 }
 
+function sanitizeClipRenderTemplateId(
+  value: string | null | undefined,
+): ClipRenderTemplateId {
+  if (value === "bold" || value === "ticker") {
+    return value;
+  }
+
+  return "clean";
+}
+
 function normalizeYouTubeConfig(
   connector: PlatformConnector,
 ): NonNullable<PlatformConnector["youtubeConfig"]> | null {
@@ -298,6 +433,75 @@ function normalizeYouTubeConfig(
       typeof source?.categoryId === "string" && source.categoryId.trim()
         ? source.categoryId.trim()
         : "28",
+  };
+}
+
+function normalizeInstagramConfig(
+  connector: PlatformConnector,
+): NonNullable<PlatformConnector["instagramConfig"]> | null {
+  const source = connector.instagramConfig;
+
+  if (!source && connector.targetId !== "reels") {
+    return null;
+  }
+
+  return {
+    accessToken:
+      typeof source?.accessToken === "string" && source.accessToken.trim()
+        ? source.accessToken.trim()
+        : null,
+    igUserId:
+      typeof source?.igUserId === "string" && source.igUserId.trim()
+        ? source.igUserId.trim()
+        : null,
+    shareToFeed: source?.shareToFeed ?? true,
+    apiVersion:
+      typeof source?.apiVersion === "string" && source.apiVersion.trim()
+        ? source.apiVersion.trim()
+        : "v23.0",
+  };
+}
+
+function normalizeTikTokConfig(
+  connector: PlatformConnector,
+): NonNullable<PlatformConnector["tiktokConfig"]> | null {
+  const source = connector.tiktokConfig;
+
+  if (!source && connector.targetId !== "tiktok") {
+    return null;
+  }
+
+  return {
+    accessToken:
+      typeof source?.accessToken === "string" && source.accessToken.trim()
+        ? source.accessToken.trim()
+        : null,
+    postMode: source?.postMode === "inbox" ? "inbox" : "direct",
+    privacyLevel:
+      typeof source?.privacyLevel === "string" && source.privacyLevel.trim()
+        ? source.privacyLevel.trim()
+        : "SELF_ONLY",
+    disableDuet: source?.disableDuet ?? false,
+    disableComment: source?.disableComment ?? false,
+    disableStitch: source?.disableStitch ?? false,
+  };
+}
+
+function normalizeClipRenderConfig(
+  connector: PlatformConnector,
+): NonNullable<PlatformConnector["clipRenderConfig"]> | null {
+  const source = connector.clipRenderConfig;
+
+  if (!source && connector.targetId !== "clips") {
+    return null;
+  }
+
+  return {
+    defaultTemplateId: sanitizeClipRenderTemplateId(source?.defaultTemplateId),
+    brandLabel:
+      typeof source?.brandLabel === "string" && source.brandLabel.trim()
+        ? source.brandLabel.trim()
+        : null,
   };
 }
 
@@ -331,6 +535,79 @@ function buildDefaultConnector(target: DistributionTarget): PlatformConnector {
         refreshToken: null,
         privacyStatus: "private",
         categoryId: "28",
+      },
+    };
+  }
+
+  if (target.id === "shorts") {
+    return {
+      targetId: target.id,
+      mode: "api",
+      readiness: "setup",
+      accountLabel: "",
+      destination: "",
+      note: "YouTube Shorts-export gebruikt dezelfde accountkoppeling als video-uploads of een eigen tenantconfig.",
+      updatedAt,
+      youtubeConfig: {
+        clientId: null,
+        clientSecret: null,
+        refreshToken: null,
+        privacyStatus: "private",
+        categoryId: "28",
+      },
+    };
+  }
+
+  if (target.id === "reels") {
+    return {
+      targetId: target.id,
+      mode: "api",
+      readiness: "setup",
+      accountLabel: "",
+      destination: "",
+      note: "Instagram Reels-export wacht nog op een tenant access token en Instagram user id.",
+      updatedAt,
+      instagramConfig: {
+        accessToken: null,
+        igUserId: null,
+        shareToFeed: true,
+        apiVersion: "v23.0",
+      },
+    };
+  }
+
+  if (target.id === "tiktok") {
+    return {
+      targetId: target.id,
+      mode: "api",
+      readiness: "setup",
+      accountLabel: "",
+      destination: "",
+      note: "TikTok export wacht nog op een tenant access token en posting-configuratie.",
+      updatedAt,
+      tiktokConfig: {
+        accessToken: null,
+        postMode: "direct",
+        privacyLevel: "SELF_ONLY",
+        disableDuet: false,
+        disableComment: false,
+        disableStitch: false,
+      },
+    };
+  }
+
+  if (target.id === "clips") {
+    return {
+      targetId: target.id,
+      mode: "api",
+      readiness: "ready",
+      accountLabel: "Render pipeline",
+      destination: "vertical-9x16 pack",
+      note: "Interne cliprenderer maakt korte verticale masters voor Shorts, Reels en TikTok.",
+      updatedAt,
+      clipRenderConfig: {
+        defaultTemplateId: "clean",
+        brandLabel: null,
       },
     };
   }
@@ -617,6 +894,45 @@ function normalizeDistributionItem(
   };
 }
 
+function normalizeClipPlan(plan: ClipPlan): ClipPlan {
+  return {
+    ...plan,
+    hook: plan.hook ?? "",
+    caption: plan.caption ?? "",
+    platforms: Array.isArray(plan.platforms) ? [...plan.platforms] : [],
+    templateId: sanitizeClipRenderTemplateId(plan.templateId),
+  };
+}
+
+function normalizeRenderedClipExport(
+  item: RenderedClipExport,
+): RenderedClipExport {
+  return {
+    ...item,
+    state:
+      item.state === "completed" || item.state === "failed" ? item.state : "queued",
+    note: item.note ?? "",
+    externalUrl: item.externalUrl ?? null,
+    externalId: item.externalId ?? null,
+    exportedAt: item.exportedAt ?? null,
+  };
+}
+
+function normalizeRenderedClip(clip: RenderedClip): RenderedClip {
+  return {
+    ...clip,
+    hook: clip.hook ?? "",
+    caption: clip.caption ?? "",
+    platforms: Array.isArray(clip.platforms) ? [...clip.platforms] : [],
+    templateId: sanitizeClipRenderTemplateId(clip.templateId),
+    assetBytes: clip.assetBytes ?? 0,
+    assetMimeType: clip.assetMimeType || "video/mp4",
+    exports: Array.isArray(clip.exports)
+      ? clip.exports.map((item) => normalizeRenderedClipExport(item))
+      : [],
+  };
+}
+
 function normalizePublishedEpisode(
   episode: PodcastEpisode,
 ): PodcastEpisode {
@@ -625,6 +941,12 @@ function normalizePublishedEpisode(
     videoPath: episode.videoPath ?? null,
     videoBytes: episode.videoBytes ?? 0,
     videoMimeType: episode.videoMimeType ?? null,
+    clipPlans: Array.isArray(episode.clipPlans)
+      ? episode.clipPlans.map((plan) => normalizeClipPlan(plan))
+      : [],
+    renderedClips: Array.isArray(episode.renderedClips)
+      ? episode.renderedClips.map((clip) => normalizeRenderedClip(clip))
+      : [],
     distribution: episode.distribution.map((item) =>
       normalizeDistributionItem(item),
     ),
@@ -642,6 +964,9 @@ function normalizeQueuedRelease(release: QueuedRelease): QueuedRelease {
     ...release,
     videoBytes: release.videoBytes ?? 0,
     videoMimeType: release.videoMimeType ?? null,
+    clipPlans: Array.isArray(release.clipPlans)
+      ? release.clipPlans.map((plan) => normalizeClipPlan(plan))
+      : [],
   };
 }
 
@@ -707,13 +1032,45 @@ function mergeConnectors(connectors: PlatformConnector[] | undefined) {
       (connector) => connector.targetId === defaultConnector.targetId,
     );
 
+    if (
+      existing?.targetId === "clips" &&
+      existing.mode === "manual" &&
+      existing.readiness === "setup" &&
+      !existing.accountLabel.trim() &&
+      !existing.destination.trim() &&
+      existing.note === "Connectorconfiguratie ontbreekt nog voor deze route."
+    ) {
+      return defaultConnector;
+    }
+
     return existing
       ? {
           ...defaultConnector,
           ...existing,
           youtubeConfig:
-            existing.targetId === "youtube"
+            existing.targetId === "youtube" || existing.targetId === "shorts"
               ? normalizeYouTubeConfig({
+                  ...defaultConnector,
+                  ...existing,
+                })
+              : null,
+          instagramConfig:
+            existing.targetId === "reels"
+              ? normalizeInstagramConfig({
+                  ...defaultConnector,
+                  ...existing,
+                })
+              : null,
+          tiktokConfig:
+            existing.targetId === "tiktok"
+              ? normalizeTikTokConfig({
+                  ...defaultConnector,
+                  ...existing,
+                })
+              : null,
+          clipRenderConfig:
+            existing.targetId === "clips"
+              ? normalizeClipRenderConfig({
                   ...defaultConnector,
                   ...existing,
                 })
@@ -722,8 +1079,20 @@ function mergeConnectors(connectors: PlatformConnector[] | undefined) {
       : {
           ...defaultConnector,
           youtubeConfig:
-            defaultConnector.targetId === "youtube"
+            defaultConnector.targetId === "youtube" || defaultConnector.targetId === "shorts"
               ? normalizeYouTubeConfig(defaultConnector)
+              : null,
+          instagramConfig:
+            defaultConnector.targetId === "reels"
+              ? normalizeInstagramConfig(defaultConnector)
+              : null,
+          tiktokConfig:
+            defaultConnector.targetId === "tiktok"
+              ? normalizeTikTokConfig(defaultConnector)
+              : null,
+          clipRenderConfig:
+            defaultConnector.targetId === "clips"
+              ? normalizeClipRenderConfig(defaultConnector)
               : null,
         };
   });
@@ -891,7 +1260,7 @@ export function buildPublishedDistribution(
       distribution.push({
         targetId,
         state: "review",
-        note: "Feed is bijgewerkt; handoff naar het platform wacht nog op validatie.",
+        note: "Feed-first distributie staat klaar; validatie of refresh richting het platform loopt via de feed-handoff.",
         externalUrl: null,
         externalId: null,
         syncedAt: null,
@@ -903,7 +1272,10 @@ export function buildPublishedDistribution(
       distribution.push({
         targetId,
         state: "queued",
-        note: "API-connector staat klaar om de push-job te draaien.",
+        note:
+          target.lane === "clips" && target.id !== "clips"
+            ? "Short-form exportjob staat klaar en wacht op verticale clipmasters."
+            : "API-connector staat klaar om de push-job te draaien.",
         externalUrl: null,
         externalId: null,
         syncedAt: null,
@@ -1000,7 +1372,12 @@ export function buildDistributionJobs(args: {
           episodeTitle,
           targetId,
           lane: target.lane,
-          kind: target.lane === "clips" ? "clip-render" : "platform-upload",
+          kind:
+            target.id === "clips"
+              ? "clip-render"
+              : target.lane === "clips"
+                ? "clip-export"
+                : "platform-upload",
           status: "failed",
           createdAt,
           note: "Connector staat uitgeschakeld voor dit kanaal.",
@@ -1016,7 +1393,12 @@ export function buildDistributionJobs(args: {
           episodeTitle,
           targetId,
           lane: target.lane,
-          kind: target.lane === "clips" ? "clip-render" : "platform-upload",
+          kind:
+            target.id === "clips"
+              ? "clip-render"
+              : target.lane === "clips"
+                ? "clip-export"
+                : "platform-upload",
           status: "failed",
           createdAt,
           note: "Connector mist bestemming of accountconfiguratie.",
@@ -1048,13 +1430,17 @@ export function buildDistributionJobs(args: {
           episodeTitle,
           targetId,
           lane: target.lane,
-          kind: "clip-render",
+          kind: target.id === "clips" ? "clip-render" : "clip-export",
           status: "pending",
           createdAt,
           note:
-            connector.mode === "api"
-              ? "Clip-export kan via API- of renderworkflow starten."
-              : "Clip-render wacht op een handmatige of semi-automatische stap.",
+            target.id === "clips"
+              ? connector.mode === "api"
+                ? "Clip-render kan via de renderworkflow starten."
+                : "Clip-render wacht op een handmatige of semi-automatische stap."
+              : connector.mode === "api"
+                ? "Platform-export staat klaar en gebruikt de verticale clipmasters uit de renderpipeline."
+                : "Clip-export wacht op een handmatige of semi-automatische stap.",
         }),
       );
       continue;

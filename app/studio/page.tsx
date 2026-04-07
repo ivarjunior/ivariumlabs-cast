@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   type CastWorkspace,
+  clipRenderTemplates,
   getConnectorBoardStats,
   getDashboardStats,
   getJobBoardStats,
@@ -53,6 +54,13 @@ function formatJobHistoryEventLabel(event: string) {
   }
 
   return "Status aangepast";
+}
+
+function formatClipTemplateLabel(templateId: string) {
+  return (
+    clipRenderTemplates.find((template) => template.id === templateId)?.label ??
+    templateId
+  );
 }
 
 function StatusPill({
@@ -582,8 +590,14 @@ export function StudioShell({
                         type="text"
                         defaultValue={connector.destination}
                         placeholder={
-                          connector.targetId === "youtube"
+                          connector.targetId === "youtube" || connector.targetId === "shorts"
                             ? "optionele playlist id"
+                            : connector.targetId === "reels"
+                              ? "optionele reel dashboard url"
+                              : connector.targetId === "tiktok"
+                                ? "optionele creator dashboard url"
+                                : connector.targetId === "clips"
+                                  ? "vertical-9x16 pack"
                             : "feed.xml ingest of directory route"
                         }
                         className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none placeholder:text-foreground/35"
@@ -591,12 +605,12 @@ export function StudioShell({
                     </label>
                   </div>
 
-                  {connector.targetId === "youtube" ? (
+                  {connector.targetId === "youtube" || connector.targetId === "shorts" ? (
                     <div className="rounded-[1.75rem] border border-white/10 bg-black/18 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
-                            Tenant API config
+                            YouTube tenant API config
                           </p>
                           <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground/64">
                             Laat lege velden ongemoeid om eerder opgeslagen waarden
@@ -693,6 +707,238 @@ export function StudioShell({
                             type="text"
                             defaultValue={connector.youtubeConfig?.categoryId ?? "28"}
                             placeholder="28"
+                            className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none placeholder:text-foreground/35"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {connector.targetId === "reels" ? (
+                    <div className="rounded-[1.75rem] border border-white/10 bg-black/18 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
+                            Instagram tenant API config
+                          </p>
+                          <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground/64">
+                            Gebruik een tenant access token en het Instagram user id
+                            van het gekoppelde business-account voor Reels exports.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs font-semibold text-foreground/76">
+                            token {connector.instagramConfig?.accessToken ? "saved" : "missing"}
+                          </span>
+                          <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs font-semibold text-foreground/76">
+                            user id {connector.instagramConfig?.igUserId ? "saved" : "missing"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-2 text-sm text-foreground/68 sm:col-span-2">
+                          <span className="font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                            Access token
+                          </span>
+                          <input
+                            name="instagramAccessToken"
+                            type="password"
+                            defaultValue=""
+                            placeholder={
+                              connector.instagramConfig?.accessToken
+                                ? "Opgeslagen waarde blijft behouden"
+                                : "Tenant access token"
+                            }
+                            className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none placeholder:text-foreground/35"
+                          />
+                        </label>
+
+                        <label className="space-y-2 text-sm text-foreground/68">
+                          <span className="font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                            Instagram User ID
+                          </span>
+                          <input
+                            name="instagramIgUserId"
+                            type="text"
+                            defaultValue=""
+                            placeholder={
+                              connector.instagramConfig?.igUserId
+                                ? "Opgeslagen waarde blijft behouden"
+                                : "1784..."
+                            }
+                            className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none placeholder:text-foreground/35"
+                          />
+                        </label>
+
+                        <label className="space-y-2 text-sm text-foreground/68">
+                          <span className="font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                            API version
+                          </span>
+                          <input
+                            name="instagramApiVersion"
+                            type="text"
+                            defaultValue={connector.instagramConfig?.apiVersion ?? "v23.0"}
+                            placeholder="v23.0"
+                            className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none placeholder:text-foreground/35"
+                          />
+                        </label>
+                      </div>
+
+                      <label className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/4 px-4 py-2 text-xs font-semibold text-foreground/76">
+                        <input
+                          type="checkbox"
+                          name="instagramShareToFeed"
+                          defaultChecked={connector.instagramConfig?.shareToFeed ?? true}
+                          className="h-4 w-4 accent-[var(--sky-glow)]"
+                        />
+                        <span>Share naar Instagram feed</span>
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {connector.targetId === "tiktok" ? (
+                    <div className="rounded-[1.75rem] border border-white/10 bg-black/18 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
+                            TikTok tenant API config
+                          </p>
+                          <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground/64">
+                            Gebruik een tenant access token en kies of clips direct
+                            worden gepost of eerst in de inbox van de creator landen.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs font-semibold text-foreground/76">
+                            token {connector.tiktokConfig?.accessToken ? "saved" : "missing"}
+                          </span>
+                          <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs font-semibold text-foreground/76">
+                            mode {connector.tiktokConfig?.postMode ?? "direct"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-2 text-sm text-foreground/68 sm:col-span-2">
+                          <span className="font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                            Access token
+                          </span>
+                          <input
+                            name="tiktokAccessToken"
+                            type="password"
+                            defaultValue=""
+                            placeholder={
+                              connector.tiktokConfig?.accessToken
+                                ? "Opgeslagen waarde blijft behouden"
+                                : "Tenant access token"
+                            }
+                            className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none placeholder:text-foreground/35"
+                          />
+                        </label>
+
+                        <label className="space-y-2 text-sm text-foreground/68">
+                          <span className="font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                            Post mode
+                          </span>
+                          <select
+                            name="tiktokPostMode"
+                            defaultValue={connector.tiktokConfig?.postMode ?? "direct"}
+                            className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none"
+                          >
+                            <option value="direct">direct</option>
+                            <option value="inbox">inbox</option>
+                          </select>
+                        </label>
+
+                        <label className="space-y-2 text-sm text-foreground/68">
+                          <span className="font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                            Privacy level
+                          </span>
+                          <input
+                            name="tiktokPrivacyLevel"
+                            type="text"
+                            defaultValue={connector.tiktokConfig?.privacyLevel ?? "SELF_ONLY"}
+                            placeholder="SELF_ONLY"
+                            className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none placeholder:text-foreground/35"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/4 px-4 py-2 text-xs font-semibold text-foreground/76">
+                          <input
+                            type="checkbox"
+                            name="tiktokDisableComment"
+                            defaultChecked={connector.tiktokConfig?.disableComment ?? false}
+                            className="h-4 w-4 accent-[var(--sky-glow)]"
+                          />
+                          <span>Disable comments</span>
+                        </label>
+                        <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/4 px-4 py-2 text-xs font-semibold text-foreground/76">
+                          <input
+                            type="checkbox"
+                            name="tiktokDisableDuet"
+                            defaultChecked={connector.tiktokConfig?.disableDuet ?? false}
+                            className="h-4 w-4 accent-[var(--sky-glow)]"
+                          />
+                          <span>Disable duet</span>
+                        </label>
+                        <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/4 px-4 py-2 text-xs font-semibold text-foreground/76">
+                          <input
+                            type="checkbox"
+                            name="tiktokDisableStitch"
+                            defaultChecked={connector.tiktokConfig?.disableStitch ?? false}
+                            className="h-4 w-4 accent-[var(--sky-glow)]"
+                          />
+                          <span>Disable stitch</span>
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {connector.targetId === "clips" ? (
+                    <div className="rounded-[1.75rem] border border-white/10 bg-black/18 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
+                            Render defaults
+                          </p>
+                          <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground/64">
+                            Stel hier de standaard template en brand-label in voor
+                            de vertical clip renders. Per clip kun je nog een eigen
+                            template kiezen.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-2 text-sm text-foreground/68">
+                          <span className="font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                            Default template
+                          </span>
+                          <select
+                            name="clipDefaultTemplateId"
+                            defaultValue={connector.clipRenderConfig?.defaultTemplateId ?? "clean"}
+                            className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none"
+                          >
+                            {clipRenderTemplates.map((template) => (
+                              <option key={template.id} value={template.id}>
+                                {template.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="space-y-2 text-sm text-foreground/68">
+                          <span className="font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                            Brand label
+                          </span>
+                          <input
+                            name="clipBrandLabel"
+                            type="text"
+                            defaultValue={connector.clipRenderConfig?.brandLabel ?? ""}
+                            placeholder="IvariumLabs Cast"
                             className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none placeholder:text-foreground/35"
                           />
                         </label>
@@ -973,6 +1219,103 @@ export function StudioShell({
                   <p className="mt-4 text-xs uppercase tracking-[0.24em] text-foreground/50">
                     {formatDutchDate(episode.publishedAt)}
                   </p>
+                  {episode.clipPlans.length > 0 ? (
+                    <div className="mt-5 rounded-3xl border border-white/10 bg-black/18 p-4">
+                      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
+                        Clip segments
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {episode.clipPlans.map((plan) => (
+                          <span
+                            key={`${episode.id}-${plan.id}`}
+                            className="rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs font-semibold text-foreground/76"
+                          >
+                            {plan.title} · {plan.startTime}-{plan.endTime} ·{" "}
+                            {formatClipTemplateLabel(plan.templateId)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {episode.renderedClips.length > 0 ? (
+                    <div className="mt-5 rounded-3xl border border-white/10 bg-black/18 p-4">
+                      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
+                        Rendered clips
+                      </p>
+                      <div className="mt-3 grid gap-3">
+                        {episode.renderedClips.map((clip) => (
+                          <div
+                            key={clip.id}
+                            className="rounded-2xl border border-white/8 bg-white/4 p-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-foreground">
+                                  {clip.title}
+                                </p>
+                                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-foreground/45">
+                                  {clip.startTime}-{clip.endTime} · {clip.durationSeconds}s ·{" "}
+                                  {formatClipTemplateLabel(clip.templateId)}
+                                </p>
+                              </div>
+                              <a
+                                href={clip.assetPath}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center rounded-full border border-white/10 bg-black/18 px-3 py-1 text-xs font-semibold text-foreground/76 transition-colors hover:bg-white/10"
+                              >
+                                Open clip
+                              </a>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {clip.platforms.map((platform) => (
+                                <span
+                                  key={`${clip.id}-${platform}`}
+                                  className="rounded-full border border-white/10 bg-black/18 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/60"
+                                >
+                                  {platform}
+                                </span>
+                              ))}
+                            </div>
+                            {clip.exports.length > 0 ? (
+                              <div className="mt-4 grid gap-2">
+                                {clip.exports.map((item) => {
+                                  const target = getTargets([item.platform])[0];
+
+                                  return (
+                                    <div
+                                      key={`${clip.id}-${item.platform}`}
+                                      className="rounded-2xl border border-white/8 bg-black/18 p-3"
+                                    >
+                                      <div className="flex items-center justify-between gap-3">
+                                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-foreground/64">
+                                          {target?.label ?? item.platform}
+                                        </p>
+                                        <StatusPill state={item.state} label={item.state} />
+                                      </div>
+                                      <p className="mt-2 text-xs leading-5 text-foreground/58">
+                                        {item.note}
+                                      </p>
+                                      {item.externalUrl ? (
+                                        <a
+                                          href={item.externalUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="mt-3 inline-flex items-center rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs font-semibold text-foreground/76 transition-colors hover:bg-white/10"
+                                        >
+                                          Open export
+                                        </a>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="min-w-0 rounded-3xl border border-white/10 bg-black/18 p-4 lg:w-[24rem]">

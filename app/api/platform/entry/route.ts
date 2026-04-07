@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { grantTenantAccessOnResponse } from "@/lib/cast-access";
+import {
+  grantCastPlatformSessionOnResponse,
+  grantTenantAccessOnResponse,
+} from "@/lib/cast-access";
 import { getTenantWorkspaceByCompanyId, upsertTenantWorkspace } from "@/lib/cast-store";
 import {
   getCastPlatformEntryStatus,
@@ -52,6 +55,12 @@ export async function GET(request: Request) {
   const response = NextResponse.redirect(
     new URL(`/studio/${workspace.tenant.slug}`, request.url),
   );
+  grantCastPlatformSessionOnResponse(response, {
+    companyId: payload.companyId,
+    companyName: payload.companyName,
+    tenantSlug: workspace.tenant.slug,
+    userId: payload.userId,
+  });
   grantTenantAccessOnResponse(response, workspace.tenant);
 
   return response;

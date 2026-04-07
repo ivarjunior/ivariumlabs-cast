@@ -2,14 +2,15 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { distributionTargets } from "@/lib/cast";
+import { clipPlatforms, clipRenderTemplates, distributionTargets } from "@/lib/cast";
 import { createReleaseDraft, type ReleaseDraftState } from "./actions";
 
 const audioTargetIds = new Set(["spotify", "apple", "pocketcasts", "overcast"]);
-const videoTargetIds = new Set(["youtube", "clips"]);
+const videoTargetIds = new Set(["youtube", "shorts", "reels", "tiktok"]);
 
 const audioTargets = distributionTargets.filter((target) => audioTargetIds.has(target.id));
 const videoTargets = distributionTargets.filter((target) => videoTargetIds.has(target.id));
+const clipPlanSlots = [1, 2, 3] as const;
 
 const initialReleaseDraftState: ReleaseDraftState = {
   status: "idle",
@@ -455,7 +456,7 @@ export function ReleaseDraftForm({ tenantSlug }: { tenantSlug: string }) {
 
           <fieldset className="rounded-3xl border border-white/10 bg-black/18 p-4">
             <legend className="px-2 font-mono text-xs uppercase tracking-[0.28em] text-sky-glow">
-              Video & clips
+              Video & short-form
             </legend>
             <div className="mt-3 space-y-3">
               {videoTargets.map((target) => (
@@ -481,14 +482,134 @@ export function ReleaseDraftForm({ tenantSlug }: { tenantSlug: string }) {
                 </label>
               ))}
             </div>
+            <p className="mt-4 text-sm leading-6 text-foreground/58">
+              Zodra je Shorts, Reels of TikTok selecteert, plant de backend automatisch
+              eerst de verticale render pipeline en daarna de account-export jobs.
+            </p>
           </fieldset>
         </div>
+
+        <fieldset className="rounded-3xl border border-white/10 bg-black/18 p-4">
+          <legend className="px-2 font-mono text-xs uppercase tracking-[0.28em] text-sky-glow">
+            Clip segments
+          </legend>
+          <div className="mt-3 grid gap-4">
+            {clipPlanSlots.map((slot) => (
+              <div
+                key={slot}
+                className="rounded-[1.75rem] border border-white/8 bg-white/4 p-4"
+              >
+                <div className="grid gap-4 lg:grid-cols-[1fr_0.24fr_0.24fr]">
+                  <div className="space-y-2">
+                    <InputLabel htmlFor={`clipTitle${slot}`}>Clip {slot} titel</InputLabel>
+                    <input
+                      id={`clipTitle${slot}`}
+                      name={`clipTitle${slot}`}
+                      type="text"
+                      placeholder={`Clip ${slot}: hook en highlight`}
+                      className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none transition-colors placeholder:text-foreground/35 focus:border-accent/65"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <InputLabel htmlFor={`clipStart${slot}`}>Start</InputLabel>
+                    <input
+                      id={`clipStart${slot}`}
+                      name={`clipStart${slot}`}
+                      type="text"
+                      placeholder="00:15"
+                      className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none transition-colors placeholder:text-foreground/35 focus:border-accent/65"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <InputLabel htmlFor={`clipEnd${slot}`}>Einde</InputLabel>
+                    <input
+                      id={`clipEnd${slot}`}
+                      name={`clipEnd${slot}`}
+                      type="text"
+                      placeholder="00:45"
+                      className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none transition-colors placeholder:text-foreground/35 focus:border-accent/65"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr_0.56fr]">
+                  <div className="space-y-2">
+                    <InputLabel htmlFor={`clipHook${slot}`}>Hook</InputLabel>
+                    <textarea
+                      id={`clipHook${slot}`}
+                      name={`clipHook${slot}`}
+                      rows={2}
+                      placeholder="Wat pakt de kijker in de eerste seconden?"
+                      className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-foreground/35 focus:border-accent/65"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <InputLabel htmlFor={`clipCaption${slot}`}>Caption</InputLabel>
+                    <textarea
+                      id={`clipCaption${slot}`}
+                      name={`clipCaption${slot}`}
+                      rows={2}
+                      placeholder="Caption of posttekst voor deze clip"
+                      className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-foreground/35 focus:border-accent/65"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <InputLabel htmlFor={`clipTemplate${slot}`}>Template</InputLabel>
+                    <select
+                      id={`clipTemplate${slot}`}
+                      name={`clipTemplate${slot}`}
+                      defaultValue="clean"
+                      className="w-full rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-sm text-foreground outline-none transition-colors focus:border-accent/65"
+                    >
+                      {clipRenderTemplates.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs leading-5 text-foreground/50">
+                      Kies hoe subtitles en branding in beeld worden gerenderd.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                    Platformen
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    {clipPlatforms.map((platform) => (
+                      <label
+                        key={`${slot}-${platform.id}`}
+                        className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/18 px-3 py-2 text-xs font-semibold text-foreground/76"
+                      >
+                        <input
+                          type="checkbox"
+                          name={`clipPlatforms${slot}`}
+                          value={platform.id}
+                          defaultChecked={platform.id === "shorts" || platform.id === "reels"}
+                          className="h-4 w-4 accent-[var(--sky-glow)]"
+                        />
+                        <span>{platform.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-sm leading-6 text-foreground/60">
+            Gebruik korte segmenten onder de 90 seconden. De renderer maakt
+            verticale 9:16 masters met subtitles, branding en exports voor Shorts,
+            Reels en TikTok.
+          </p>
+        </fieldset>
 
         <div className="flex flex-col gap-4 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="max-w-2xl space-y-3">
             <p className="text-sm leading-6 text-foreground/60">
               Bestanden worden met signed uploads direct naar de media-opslag
-              geschreven en alleen de metadata gaat de JSON-store in.
+              geschreven en alleen de metadata gaat de backend-store in.
             </p>
 
             {uploadStatus.phase !== "idle" ? (
@@ -629,6 +750,24 @@ export function ReleaseDraftForm({ tenantSlug }: { tenantSlug: string }) {
                 </div>
               </div>
             </div>
+
+            {preview.clipTitles.length > 0 ? (
+              <div className="rounded-3xl border border-white/10 bg-white/4 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
+                  Clip pipeline
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {preview.clipTitles.map((clipTitle) => (
+                    <span
+                      key={clipTitle}
+                      className="rounded-full border border-white/10 bg-black/18 px-3 py-1 text-xs font-semibold text-foreground/76"
+                    >
+                      {clipTitle}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="rounded-3xl border border-white/10 bg-white/4 p-4">
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-accent-soft">

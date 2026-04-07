@@ -113,6 +113,9 @@ function createFailedConnectorResult(note: string) {
     note,
     externalUrl: null,
     externalId: null,
+    renderedClips: [] as NonNullable<
+      Awaited<ReturnType<typeof executeDistributionConnector>>["renderedClips"]
+    >,
   };
 }
 
@@ -241,6 +244,10 @@ async function executeJobInWorkspace(args: {
     item.id === job.episodeId
       ? {
           ...item,
+          renderedClips:
+            result.renderedClips && result.renderedClips.length > 0
+              ? result.renderedClips
+              : item.renderedClips,
           distribution: item.distribution.map((distributionItem) =>
             distributionItem.targetId === job.targetId
               ? {

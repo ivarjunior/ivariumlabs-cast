@@ -277,6 +277,24 @@ function buildPublicUrl(publicBaseUrl: string, objectKey: string) {
   return `${publicBaseUrl}/${objectKey}`;
 }
 
+function buildDerivedObjectKey(args: {
+  tenantSlug: string;
+  slug: string;
+  folder: string;
+  fileName: string;
+}) {
+  const safeTenantSlug = slugify(args.tenantSlug) || "workspace";
+  const safeSlug = slugify(args.slug) || "release";
+  const safeFolder = slugify(args.folder) || "derived";
+  const extension = path.extname(args.fileName).toLowerCase();
+  const baseName =
+    slugify(path.basename(args.fileName, extension || undefined)) || "asset";
+  const resolvedExtension = extension || ".bin";
+  const storedFileName = `${Date.now()}-${safeSlug}-${baseName}${resolvedExtension}`;
+
+  return `casts/${safeTenantSlug}/${safeFolder}/${safeSlug}/${storedFileName}`;
+}
+
 export class ObjectStorageConfigurationError extends Error {
   readonly missing: string[];
 
@@ -406,5 +424,52 @@ export async function createSignedUpload(args: {
     headers: {
       "Content-Type": storedUpload.contentType,
     },
+  };
+}
+
+export async function persistDerivedAsset(args: {
+  tenantSlug: string;
+  slug: string;
+  folder: string;
+  fileName: string;
+  body: Buffer | Uint8Array | string;
+  contentType: string;
+  cacheControl?: string;
+}): Promise<StoredUpload> {
+  const { config, status } = resolveObjectStorageConfig();
+
+  if (!config) {
+    throw new ObjectStorageConfigurationError(status);
+  }
+
+  const key = buildDerivedObjectKey({
+    tenantSlug: args.tenantSlug,
+    slug: args.slug,
+    folder: args.folder,
+    fileName: args.fileName,
+  });
+  const client = getObjectStorageClient(config);
+  const buffer =
+    typeof args.body === "string"
+      ? Buffer.from(args.body)
+      : Buffer.isBuffer(args.body)
+        ? args.body
+        : Buffer.from(args.body);
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: args.contentType,
+      CacheControl: args.cacheControl ?? "public, max-age=31536000, immutable",
+    }),
+  );
+
+  return {
+    sourceName: args.fileName,
+    publicPath: buildPublicUrl(config.publicBaseUrl, key),
+    byteLength: buffer.byteLength,
+    contentType: args.contentType,
   };
 }

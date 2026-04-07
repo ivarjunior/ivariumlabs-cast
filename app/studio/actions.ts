@@ -5,7 +5,12 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   appendDistributionJobHistory,
+  clipPlatforms,
+  clipRenderTemplates,
   type CastStore,
+  type ClipPlan,
+  type ClipPlatform,
+  type ClipRenderTemplateId,
   createDistributionJobHistoryEntry,
   type DistributionJobStatus,
   type PlatformConnector,
@@ -21,6 +26,7 @@ import {
 import {
   CastTenantAccessError,
   grantTenantAccess,
+  isTenantAccessCodeFallbackEnabled,
   requireTenantWorkspaceAccess,
   revokeTenantAccess,
 } from "@/lib/cast-access";
@@ -55,11 +61,18 @@ export type ReleaseDraftState = {
     files: string[];
     audioTargets: string[];
     videoTargets: string[];
+    clipTitles: string[];
     nextChecks: string[];
   } | null;
 };
 
 const knownTargetIds = new Set<string>(distributionTargets.map((target) => target.id));
+const knownClipPlatforms = new Set<ClipPlatform>(clipPlatforms.map((platform) => platform.id));
+const shortFormTargetIds = new Set<string>(clipPlatforms.map((platform) => platform.id));
+const knownClipRenderTemplateIds = new Set<ClipRenderTemplateId>(
+  clipRenderTemplates.map((template) => template.id),
+);
+const maxClipPlansPerRelease = 3;
 
 function readText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
@@ -102,6 +115,126 @@ function readStoredUpload(formData: FormData, prefix: "audio" | "video" | "artwo
           ? "video/mp4"
           : "image/png"),
   } satisfies StoredUpload;
+}
+
+function sanitizeClipPlatforms(entries: FormDataEntryValue[]) {
+  return [...new Set(
+    entries
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => entry.trim())
+      .filter((entry): entry is ClipPlatform => knownClipPlatforms.has(entry as ClipPlatform)),
+  )];
+}
+
+function parseClipTimestampToSeconds(value: string) {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const parts = normalized.split(":").map((part) => part.trim());
+
+  if (parts.length === 0 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) {
+    return null;
+  }
+
+  const values = parts.map((part) => Number.parseInt(part, 10));
+  const [hours, minutes, seconds] =
+    values.length === 3
+      ? [values[0] ?? 0, values[1] ?? 0, values[2] ?? 0]
+      : values.length === 2
+        ? [0, values[0] ?? 0, values[1] ?? 0]
+        : [0, 0, values[0] ?? 0];
+
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function formatClipTimestamp(totalSeconds: number) {
+  const safeSeconds = Math.max(Math.trunc(totalSeconds), 0);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function sanitizeClipRenderTemplateId(
+  value: string,
+): ClipRenderTemplateId {
+  return knownClipRenderTemplateIds.has(value as ClipRenderTemplateId)
+    ? (value as ClipRenderTemplateId)
+    : "clean";
+}
+
+function readClipPlans(formData: FormData) {
+  const plans: ClipPlan[] = [];
+  const issues: string[] = [];
+
+  for (let index = 1; index <= maxClipPlansPerRelease; index += 1) {
+    const title = readText(formData.get(`clipTitle${index}`));
+    const startTime = readText(formData.get(`clipStart${index}`));
+    const endTime = readText(formData.get(`clipEnd${index}`));
+    const hook = readText(formData.get(`clipHook${index}`));
+    const caption = readText(formData.get(`clipCaption${index}`));
+    const templateId = sanitizeClipRenderTemplateId(
+      readText(formData.get(`clipTemplate${index}`)),
+    );
+    const platforms = sanitizeClipPlatforms(formData.getAll(`clipPlatforms${index}`));
+    const hasAnyValue =
+      Boolean(title) ||
+      Boolean(startTime) ||
+      Boolean(endTime) ||
+      Boolean(hook) ||
+      Boolean(caption);
+
+    if (!hasAnyValue) {
+      continue;
+    }
+
+    if (!title) {
+      issues.push(`Clip ${index} mist nog een titel.`);
+      continue;
+    }
+
+    const startSeconds = parseClipTimestampToSeconds(startTime);
+    const endSeconds = parseClipTimestampToSeconds(endTime);
+
+    if (startSeconds === null || endSeconds === null) {
+      issues.push(`Clip ${index} heeft geen geldige start- en eindtijd.`);
+      continue;
+    }
+
+    if (endSeconds <= startSeconds) {
+      issues.push(`Clip ${index} moet eindigen na de starttijd.`);
+      continue;
+    }
+
+    plans.push({
+      id: `clip-${index}`,
+      title,
+      startTime: formatClipTimestamp(startSeconds),
+      endTime: formatClipTimestamp(endSeconds),
+      startSeconds,
+      endSeconds,
+      hook,
+      caption,
+      platforms:
+        platforms.length > 0
+          ? platforms
+          : clipPlatforms.map((platform) => platform.id),
+      templateId,
+    });
+  }
+
+  return {
+    plans,
+    issues,
+  };
 }
 
 function readTenantSlug(formData: FormData) {
@@ -190,6 +323,10 @@ function sanitizeYouTubePrivacyStatus(
   return "private";
 }
 
+function sanitizeTikTokPostMode(value: string): "direct" | "inbox" {
+  return value === "inbox" ? "inbox" : "direct";
+}
+
 export async function createReleaseDraft(
   _previousState: ReleaseDraftState,
   formData: FormData,
@@ -208,8 +345,9 @@ export async function createReleaseDraft(
   const artworkUploadReference = readStoredUpload(formData, "artwork");
   const audioTargets = sanitizeTargetIds(formData.getAll("audioTargets"));
   const videoTargets = sanitizeTargetIds(formData.getAll("videoTargets"));
+  const clipPlanResult = readClipPlans(formData);
 
-  const issues: string[] = [];
+  const issues: string[] = [...clipPlanResult.issues];
 
   if (!title) {
     issues.push("Voer een episodetitel in.");
@@ -232,11 +370,18 @@ export async function createReleaseDraft(
   }
 
   if (videoTargets.length > 0 && !videoMaster && !videoUploadReference) {
-    issues.push("Kies een videomaster voor YouTube of clips.");
+    issues.push("Kies een videomaster voor YouTube, Shorts, Reels of TikTok.");
   }
 
   if (audioTargets.length === 0 && videoTargets.length === 0) {
     issues.push("Selecteer minimaal één distributiedoel.");
+  }
+
+  if (
+    videoTargets.some((targetId) => shortFormTargetIds.has(targetId)) &&
+    clipPlanResult.plans.length === 0
+  ) {
+    issues.push("Voeg minimaal één clipsegment toe voor Shorts, Reels of TikTok.");
   }
 
   if (issues.length > 0) {
@@ -276,7 +421,15 @@ export async function createReleaseDraft(
   const slug = slugify(title);
   const episodeNumber = getNextEpisodeNumber(store);
   const seasonNumber = 1;
-  const targetIds = [...new Set([...audioTargets, ...videoTargets])];
+  const targetIds = [
+    ...new Set([
+      ...audioTargets,
+      ...(videoTargets.some((targetId) => shortFormTargetIds.has(targetId))
+        ? ["clips"]
+        : []),
+      ...videoTargets,
+    ]),
+  ];
 
   let audioUpload = audioUploadReference;
   let videoUpload = videoUploadReference;
@@ -356,6 +509,7 @@ export async function createReleaseDraft(
     artworkName: artworkUpload.sourceName,
     artworkPath: artworkUpload.publicPath,
     targetIds,
+    clipPlans: clipPlanResult.plans,
   };
 
   const nextWorkspace = {
@@ -409,6 +563,7 @@ export async function createReleaseDraft(
       ].filter(isDefined),
       audioTargets: getTargetLabels(audioTargets),
       videoTargets: getTargetLabels(videoTargets),
+      clipTitles: clipPlanResult.plans.map((plan) => plan.title),
       nextChecks: [
         "Controleer de queued releasekaart in de studio.",
         "Gebruik daarna de publish-knop om de episode in de feed te zetten.",
@@ -461,6 +616,8 @@ export async function publishQueuedRelease(formData: FormData) {
     episodeNumber: release.episodeNumber,
     explicit: release.explicit,
     status: "published",
+    clipPlans: release.clipPlans ?? [],
+    renderedClips: [],
     distribution: buildPublishedDistribution(release.targetIds, store.connectors),
   };
   const jobs = buildDistributionJobs({
@@ -499,6 +656,20 @@ export async function saveConnectorConfig(formData: FormData) {
     readText(formData.get("youtubePrivacyStatus")),
   );
   const youtubeCategoryId = readText(formData.get("youtubeCategoryId"));
+  const instagramAccessToken = readText(formData.get("instagramAccessToken"));
+  const instagramIgUserId = readText(formData.get("instagramIgUserId"));
+  const instagramApiVersion = readText(formData.get("instagramApiVersion"));
+  const instagramShareToFeed = formData.get("instagramShareToFeed") === "on";
+  const tiktokAccessToken = readText(formData.get("tiktokAccessToken"));
+  const tiktokPostMode = sanitizeTikTokPostMode(readText(formData.get("tiktokPostMode")));
+  const tiktokPrivacyLevel = readText(formData.get("tiktokPrivacyLevel"));
+  const tiktokDisableDuet = formData.get("tiktokDisableDuet") === "on";
+  const tiktokDisableComment = formData.get("tiktokDisableComment") === "on";
+  const tiktokDisableStitch = formData.get("tiktokDisableStitch") === "on";
+  const clipDefaultTemplateId = sanitizeClipRenderTemplateId(
+    readText(formData.get("clipDefaultTemplateId")),
+  );
+  const clipBrandLabel = readText(formData.get("clipBrandLabel"));
 
   if (!targetId || !distributionTargets.some((target) => target.id === targetId)) {
     return;
@@ -525,7 +696,7 @@ export async function saveConnectorConfig(formData: FormData) {
           note,
           updatedAt,
           youtubeConfig:
-            targetId === "youtube"
+            targetId === "youtube" || targetId === "shorts"
               ? {
                   clientId:
                     youtubeClientId ||
@@ -549,6 +720,73 @@ export async function saveConnectorConfig(formData: FormData) {
                     "28",
                 }
               : connector.youtubeConfig ?? null,
+          instagramConfig:
+            targetId === "reels"
+              ? {
+                  accessToken:
+                    instagramAccessToken ||
+                    connector.instagramConfig?.accessToken ||
+                    null,
+                  igUserId:
+                    instagramIgUserId ||
+                    connector.instagramConfig?.igUserId ||
+                    null,
+                  shareToFeed:
+                    formData.has("instagramShareToFeed") ||
+                    connector.instagramConfig?.shareToFeed !== undefined
+                      ? instagramShareToFeed
+                      : true,
+                  apiVersion:
+                    instagramApiVersion ||
+                    connector.instagramConfig?.apiVersion ||
+                    "v23.0",
+                }
+              : connector.instagramConfig ?? null,
+          tiktokConfig:
+            targetId === "tiktok"
+              ? {
+                  accessToken:
+                    tiktokAccessToken ||
+                    connector.tiktokConfig?.accessToken ||
+                    null,
+                  postMode:
+                    tiktokPostMode ||
+                    connector.tiktokConfig?.postMode ||
+                    "direct",
+                  privacyLevel:
+                    tiktokPrivacyLevel ||
+                    connector.tiktokConfig?.privacyLevel ||
+                    "SELF_ONLY",
+                  disableDuet:
+                    formData.has("tiktokDisableDuet") ||
+                    connector.tiktokConfig?.disableDuet !== undefined
+                      ? tiktokDisableDuet
+                      : false,
+                  disableComment:
+                    formData.has("tiktokDisableComment") ||
+                    connector.tiktokConfig?.disableComment !== undefined
+                      ? tiktokDisableComment
+                      : false,
+                  disableStitch:
+                    formData.has("tiktokDisableStitch") ||
+                    connector.tiktokConfig?.disableStitch !== undefined
+                      ? tiktokDisableStitch
+                      : false,
+                }
+              : connector.tiktokConfig ?? null,
+          clipRenderConfig:
+            targetId === "clips"
+              ? {
+                  defaultTemplateId:
+                    clipDefaultTemplateId ||
+                    connector.clipRenderConfig?.defaultTemplateId ||
+                    "clean",
+                  brandLabel:
+                    clipBrandLabel ||
+                    connector.clipRenderConfig?.brandLabel ||
+                    null,
+                }
+              : connector.clipRenderConfig ?? null,
         }
       : connector,
   );
@@ -749,6 +987,10 @@ export async function unlockTenantStudio(formData: FormData) {
 
   if (!workspace) {
     redirect("/studio");
+  }
+
+  if (!isTenantAccessCodeFallbackEnabled()) {
+    redirect(`/studio/${workspace.tenant.slug}?access=platform`);
   }
 
   if (accessCode !== workspace.tenant.accessCode) {
