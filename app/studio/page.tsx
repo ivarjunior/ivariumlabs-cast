@@ -3,10 +3,13 @@ import {
   type CastWorkspace,
   clipRenderTemplates,
   getConnectorBoardStats,
+  getConnectorHealthBoard,
+  getConnectorHealthBoardStats,
   getDashboardStats,
   getJobBoardStats,
   getTargets,
 } from "@/lib/cast";
+import { type CastStorePersistenceStatus } from "@/lib/cast-store";
 import { type DistributionWorkerStatus } from "@/lib/distribution-worker";
 import { type ObjectStorageStatus } from "@/lib/object-storage";
 import {
@@ -63,6 +66,22 @@ function formatClipTemplateLabel(templateId: string) {
   );
 }
 
+function formatWorkerTriggerLabel(trigger: string | null | undefined) {
+  if (trigger === "manual-job") {
+    return "Handmatige job-run";
+  }
+
+  if (trigger === "manual-batch") {
+    return "Handmatige batch-run";
+  }
+
+  if (trigger === "scheduler") {
+    return "Scheduler-run";
+  }
+
+  return "Nog geen trigger";
+}
+
 function StatusPill({
   state,
   label,
@@ -71,13 +90,25 @@ function StatusPill({
   label: string;
 }) {
   const palette =
-    state === "live" || state === "completed" || state === "ready"
+    state === "live" ||
+    state === "completed" ||
+    state === "ready" ||
+    state === "healthy" ||
+    state === "success"
       ? "border-mint-glow/30 bg-mint-glow/12 text-mint-glow"
-      : state === "queued" || state === "pending" || state === "setup"
+      : state === "queued" ||
+          state === "pending" ||
+          state === "setup" ||
+          state === "attention"
         ? "border-accent/30 bg-accent/12 text-accent-soft"
-        : state === "review" || state === "processing"
+        : state === "review" ||
+            state === "processing" ||
+            state === "active" ||
+            state === "partial"
           ? "border-sky-glow/30 bg-sky-glow/12 text-sky-glow"
-          : state === "failed" || state === "disabled"
+          : state === "failed" ||
+              state === "disabled" ||
+              state === "blocked"
             ? "border-[#ffb4a6]/30 bg-[#ffb4a6]/12 text-[#ffb4a6]"
           : "border-white/10 bg-white/6 text-foreground/74";
 
@@ -90,23 +121,250 @@ function StatusPill({
   );
 }
 
+function OverviewMetric({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/6 p-4">
+      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-foreground/55">
+        {label}
+      </p>
+      <p className="mt-3 text-3xl font-semibold tracking-[-0.05em] text-foreground">
+        {value}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-foreground/62">{detail}</p>
+    </div>
+  );
+}
+
+function OperationalCheck({
+  title,
+  state,
+  detail,
+  meta,
+}: {
+  title: string;
+  state: string;
+  detail: string;
+  meta?: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-black/18 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-2">
+          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-accent-soft">
+            {title}
+          </p>
+          <p className="text-sm leading-6 text-foreground/72">{detail}</p>
+          {meta ? (
+            <p className="text-xs uppercase tracking-[0.22em] text-foreground/45">
+              {meta}
+            </p>
+          ) : null}
+        </div>
+        <StatusPill state={state} label={state} />
+      </div>
+    </div>
+  );
+}
+
 type StudioShellProps = {
   workspace: CastWorkspace;
   storageStatus: ObjectStorageStatus;
   workerStatus: DistributionWorkerStatus;
+  persistenceStatus: CastStorePersistenceStatus;
+  platformEntryStatus: {
+    configured: boolean;
+    missing: string[];
+  };
 };
 
 export function StudioShell({
   workspace,
   storageStatus,
   workerStatus,
+  persistenceStatus,
+  platformEntryStatus,
 }: StudioShellProps) {
   const { tenant, show, publishedEpisodes, queuedReleases, distributionJobs, connectors } =
     workspace;
   const dashboardStats = getDashboardStats(workspace);
   const jobBoardStats = getJobBoardStats(workspace);
   const connectorBoardStats = getConnectorBoardStats(workspace);
+  const connectorHealthBoard = getConnectorHealthBoard(workspace);
+  const connectorHealthStats = getConnectorHealthBoardStats(workspace);
+  const connectorHealthByTarget = new Map(
+    connectorHealthBoard.map((item) => [item.targetId, item]),
+  );
+  const workerRuntime = workspace.workerRuntime;
   const openJobs = jobBoardStats.pending + jobBoardStats.processing + jobBoardStats.failed;
+  const distributionStateStats = publishedEpisodes.reduce(
+    (summary, episode) => {
+      for (const item of episode.distribution) {
+        if (item.state === "live") {
+          summary.live += 1;
+          continue;
+        }
+
+        if (item.state === "review") {
+          summary.review += 1;
+          continue;
+        }
+
+        if (item.state === "queued") {
+          summary.queued += 1;
+          continue;
+        }
+
+        summary.manual += 1;
+      }
+
+      return summary;
+    },
+    {
+      live: 0,
+      review: 0,
+      queued: 0,
+      manual: 0,
+    },
+  );
+  const openWorkItems =
+    queuedReleases.length +
+    jobBoardStats.pending +
+    jobBoardStats.processing +
+    jobBoardStats.failed;
+  const setupDebt =
+    connectorBoardStats.setup +
+    storageStatus.missing.length +
+    workerStatus.missing.length +
+    platformEntryStatus.missing.length +
+    persistenceStatus.issues.length;
+  const systemChecks = [
+    {
+      title: "Metadata store",
+      state: persistenceStatus.configured ? "ready" : "failed",
+      detail: persistenceStatus.configured
+        ? persistenceStatus.mode === "sanity"
+          ? "Tenantmetadata schrijft terug naar Sanity."
+          : "Lokale file store is actief voor development of fallback."
+        : persistenceStatus.issues[0] ??
+          "Metadata-opslag heeft nog een blocker.",
+      meta:
+        persistenceStatus.mode === "sanity"
+          ? "sanity persistence"
+          : "file persistence",
+    },
+    {
+      title: "Media storage",
+      state: storageStatus.configured ? "ready" : "setup",
+      detail: storageStatus.configured
+        ? "Signed uploads en derived assets landen direct in de object store."
+        : storageStatus.missing[0] ??
+          "Object storage mist nog configuratie.",
+      meta: storageStatus.bucket ?? "bucket not configured",
+    },
+    {
+      title: "Distribution worker",
+      state: !workerStatus.configured
+        ? "setup"
+        : workerRuntime.lastState === "failed"
+          ? "failed"
+          : workerRuntime.lastState === "partial"
+            ? "review"
+            : "ready",
+      detail: !workerStatus.configured
+        ? workerStatus.missing[0] ??
+          "Worker mist nog secret of schedulerconfiguratie."
+        : workerRuntime.lastRunCompletedAt
+          ? `${formatWorkerTriggerLabel(workerRuntime.lastTrigger)} eindigde ${formatDutchDate(
+              workerRuntime.lastRunCompletedAt,
+            )} met ${workerRuntime.lastCompletedJobs} succesvolle job(s) en ${workerRuntime.lastFailedJobs} fout(en).`
+          : `Worker kan batches draaien via ${workerStatus.routePath}, maar heeft nog geen tenant-run gelogd.`,
+      meta: workerRuntime.lastTrigger
+        ? `${formatWorkerTriggerLabel(workerRuntime.lastTrigger)} · batch ${workerStatus.batchSize}`
+        : `batch ${workerStatus.batchSize}`,
+    },
+    {
+      title: "Platform handoff",
+      state: platformEntryStatus.configured ? "ready" : "setup",
+      detail: platformEntryStatus.configured
+        ? "Studio kan platform-entry tokens en sessies valideren."
+        : platformEntryStatus.missing[0] ??
+          "Handoff-secret ontbreekt voor platform-auth.",
+      meta: platformEntryStatus.configured
+        ? "shared handoff enabled"
+        : "shared handoff missing",
+    },
+    {
+      title: "Feed publish",
+      state:
+        publishedEpisodes.length > 0
+          ? "live"
+          : queuedReleases.length > 0
+            ? "review"
+            : "setup",
+      detail:
+        publishedEpisodes.length > 0
+          ? `${publishedEpisodes.length} episodes publiceren nu via ${show.feedPath}.`
+          : queuedReleases.length > 0
+            ? `${queuedReleases.length} queued release(s) wachten op feed publish.`
+            : "Feedroute staat klaar, maar er is nog geen gepubliceerde episode.",
+      meta: show.feedPath,
+    },
+    {
+      title: "Connector coverage",
+      state:
+        connectorHealthStats.blocked > 0
+          ? "setup"
+          : connectorHealthStats.active > 0
+            ? "review"
+            : connectorHealthStats.healthy > 0
+              ? "ready"
+              : connectorBoardStats.setup === 0
+                ? "ready"
+                : "setup",
+      detail:
+        connectorHealthStats.blocked > 0
+          ? `${connectorHealthStats.blocked} connectoren hebben nog setup- of runtime-blockers.`
+          : connectorHealthStats.active > 0
+            ? `${connectorHealthStats.active} connectoren hebben open jobs of retries.`
+            : connectorHealthStats.healthy > 0
+              ? `${connectorHealthStats.healthy} connectoren hebben gezonde runtime-signalen.`
+              : "Connectorroutes staan klaar, maar hebben nog geen runtime-signaal.",
+      meta: `${connectorHealthStats.healthy} healthy · ${connectorHealthStats.active} active · ${connectorHealthStats.attention} attention`,
+    },
+  ];
+  const readyCheckCount = systemChecks.filter(
+    (item) => item.state === "ready" || item.state === "live",
+  ).length;
+  const currentSignals = [
+    openWorkItems > 0
+      ? `${openWorkItems} open items staan nog in queued releases of het jobboard.`
+      : "Geen open queue- of jobbacklog in deze workspace.",
+    workerRuntime.lastRunCompletedAt
+      ? `${formatWorkerTriggerLabel(workerRuntime.lastTrigger)} draaide ${formatDutchDate(
+          workerRuntime.lastRunCompletedAt,
+        )} en eindigde ${workerRuntime.lastState} met ${workerRuntime.lastCompletedJobs} completed en ${workerRuntime.lastFailedJobs} failed job(s).`
+      : workerStatus.configured
+        ? "Worker is geconfigureerd, maar deze tenant heeft nog geen geregistreerde run."
+        : "Worker mist nog configuratie voor runtime-signalen.",
+    connectorHealthStats.blocked > 0
+      ? `${connectorHealthStats.blocked} connectoren zitten geblokkeerd op setup of een recente failure.`
+      : connectorHealthStats.active > 0
+        ? `${connectorHealthStats.active} connectoren draaien met open jobs of retries.`
+        : connectorHealthStats.healthy > 0
+          ? `${connectorHealthStats.healthy} connectoren hebben nu gezonde runtime-signalen.`
+          : "Connectorroutes zijn ready, maar nog zonder runtime-activiteit.",
+    distributionStateStats.manual > 0
+      ? `${distributionStateStats.manual} distributiestatussen staan nog op manual.`
+      : "Geen manual distributiestatussen op gepubliceerde episodes.",
+  ];
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 sm:px-10 lg:px-12">
@@ -152,7 +410,116 @@ export function StudioShell({
         </div>
       </header>
 
-      <section className="grid gap-6 py-10 lg:grid-cols-[0.92fr_1.08fr]">
+      <section className="grid gap-6 py-10 xl:grid-cols-[1.08fr_0.92fr]">
+        <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-6 shadow-[0_20px_80px_rgba(2,10,24,0.2)]">
+          <p className="font-mono text-xs uppercase tracking-[0.32em] text-accent-soft">
+            Operations overview
+          </p>
+          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-foreground">
+            Je ziet nu direct welke schakels van storage tot publish echt klaar zijn.
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-foreground/68">
+            Deze samenvatting trekt de echte readiness van metadata store, object
+            storage, worker, handoff en feed publicatie naar boven in de
+            dashboardlaag. Daardoor hoef je niet meer per sectie uit te zoeken
+            waar de keten nog stokt.
+          </p>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <OverviewMetric
+              label="Checks ready"
+              value={`${readyCheckCount}/${systemChecks.length}`}
+              detail="kernschakels operationeel"
+            />
+            <OverviewMetric
+              label="Healthy routes"
+              value={String(connectorHealthStats.healthy)}
+              detail={`${connectorHealthStats.active} active · ${connectorHealthStats.blocked} blocked`}
+            />
+            <OverviewMetric
+              label="Open work"
+              value={String(openWorkItems)}
+              detail="queued releases plus open jobs"
+            />
+            <OverviewMetric
+              label="Setup debt"
+              value={String(setupDebt)}
+              detail="open configuratie-items"
+            />
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-white/10 bg-black/18 p-4">
+            <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-sky-glow">
+              Current signals
+            </p>
+            <div className="mt-4 grid gap-3">
+              {currentSignals.map((item) => (
+                <div
+                  key={item}
+                  className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-sm leading-6 text-foreground/70"
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </article>
+
+        <article className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
+          <p className="font-mono text-xs uppercase tracking-[0.32em] text-sky-glow">
+            Pipeline map
+          </p>
+          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-foreground">
+            Elke backendlaag heeft nu een zichtbare statuskaart.
+          </h2>
+          <div className="mt-6 grid gap-3">
+            {systemChecks.map((item) => (
+              <OperationalCheck
+                key={item.title}
+                title={item.title}
+                state={item.state}
+                detail={item.detail}
+                meta={item.meta}
+              />
+            ))}
+          </div>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              {
+                label: "live",
+                value: distributionStateStats.live,
+              },
+              {
+                label: "review",
+                value: distributionStateStats.review,
+              },
+              {
+                label: "queued",
+                value: distributionStateStats.queued,
+              },
+              {
+                label: "manual",
+                value: distributionStateStats.manual,
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="rounded-3xl border border-white/10 bg-black/18 p-4"
+              >
+                <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-foreground/55">
+                  {item.label}
+                </p>
+                <p className="mt-3 text-2xl font-semibold tracking-[-0.05em] text-foreground">
+                  {item.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
+
+      <section className="grid gap-6 pb-10 lg:grid-cols-[0.92fr_1.08fr]">
         <div className="space-y-6">
           <article className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(17,28,44,0.9),rgba(11,19,33,0.82))] p-6 shadow-[0_20px_100px_rgba(0,0,0,0.26)]">
             <p className="font-mono text-xs uppercase tracking-[0.32em] text-accent-soft">
@@ -313,7 +680,7 @@ export function StudioShell({
               />
             </div>
 
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-3xl border border-white/10 bg-black/18 p-4">
                 <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-accent-soft">
                   Worker route
@@ -330,6 +697,111 @@ export function StudioShell({
                   {workerStatus.schedule} · batch {workerStatus.batchSize}
                 </p>
               </div>
+              <div className="rounded-3xl border border-white/10 bg-black/18 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-accent-soft">
+                  Last run state
+                </p>
+                <div className="mt-3">
+                  <StatusPill
+                    state={!workerStatus.configured ? "setup" : workerRuntime.lastState}
+                    label={
+                      !workerStatus.configured
+                        ? "setup"
+                        : workerRuntime.lastRunCompletedAt
+                          ? workerRuntime.lastState
+                          : "idle"
+                    }
+                  />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-foreground/72">
+                  {workerRuntime.lastRunCompletedAt
+                    ? `${workerRuntime.lastCompletedJobs} completed · ${workerRuntime.lastFailedJobs} failed`
+                    : "Nog geen runtimegeschiedenis voor deze tenant."}
+                </p>
+              </div>
+              <div className="rounded-3xl border border-white/10 bg-black/18 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-accent-soft">
+                  Last completed
+                </p>
+                <p className="mt-3 text-sm leading-6 text-foreground/72">
+                  {workerRuntime.lastRunCompletedAt
+                    ? formatDutchDate(workerRuntime.lastRunCompletedAt)
+                    : "Nog geen worker-run"}
+                </p>
+                <p className="mt-2 text-xs uppercase tracking-[0.22em] text-foreground/45">
+                  {formatWorkerTriggerLabel(workerRuntime.lastTrigger)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-[1.75rem] border border-white/10 bg-black/18 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
+                    Worker runtime
+                  </p>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground/64">
+                    Laatste tenant-runs worden nu in de store opgeslagen, zodat je
+                    hier direct ziet of de scheduler, batch-run of job-run nog
+                    echt gezond loopt.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs font-semibold text-foreground/76">
+                    success{" "}
+                    {workerRuntime.lastSuccessfulRunAt
+                      ? formatDutchDate(workerRuntime.lastSuccessfulRunAt)
+                      : "nog niet"}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs font-semibold text-foreground/76">
+                    failure{" "}
+                    {workerRuntime.lastFailedRunAt
+                      ? formatDutchDate(workerRuntime.lastFailedRunAt)
+                      : "geen"}
+                  </span>
+                </div>
+              </div>
+
+              {workerRuntime.recentRuns.length > 0 ? (
+                <div className="mt-4 grid gap-3">
+                  {workerRuntime.recentRuns.slice(0, 4).map((run) => (
+                    <div
+                      key={run.id}
+                      className="rounded-2xl border border-white/10 bg-white/4 p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-accent-soft">
+                            {formatWorkerTriggerLabel(run.trigger)}
+                          </p>
+                          <p className="mt-2 text-sm leading-6 text-foreground/72">
+                            {run.note}
+                          </p>
+                        </div>
+                        <StatusPill state={run.state} label={run.state} />
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2 text-xs uppercase tracking-[0.22em] text-foreground/45">
+                        <span>start {formatDutchDate(run.startedAt)}</span>
+                        <span>
+                          einde{" "}
+                          {run.completedAt
+                            ? formatDutchDate(run.completedAt)
+                            : "nog bezig"}
+                        </span>
+                        <span>
+                          jobs {run.processedJobs} · ok {run.completedJobs} · fail{" "}
+                          {run.failedJobs}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 text-sm leading-6 text-foreground/64">
+                  Nog geen runtimehistorie opgeslagen voor deze tenant. De eerste
+                  scheduler- of batch-run verschijnt hier automatisch.
+                </p>
+              )}
             </div>
 
             <form action={runPendingDistributionQueue} className="mt-5 space-y-3">
@@ -492,9 +964,11 @@ export function StudioShell({
 
           <div className="flex flex-wrap gap-2">
             {[
-              { label: "ready", value: connectorBoardStats.ready },
-              { label: "setup", value: connectorBoardStats.setup },
-              { label: "disabled", value: connectorBoardStats.disabled },
+              { label: "healthy", value: connectorHealthStats.healthy },
+              { label: "active", value: connectorHealthStats.active },
+              { label: "attention", value: connectorHealthStats.attention },
+              { label: "blocked", value: connectorHealthStats.blocked },
+              { label: "idle", value: connectorHealthStats.idle },
             ].map((item) => (
               <span
                 key={item.label}
@@ -509,6 +983,7 @@ export function StudioShell({
         <div className="mt-8 grid gap-4 xl:grid-cols-2">
           {connectors.map((connector) => {
             const target = getTargets([connector.targetId])[0];
+            const connectorHealth = connectorHealthByTarget.get(connector.targetId);
 
             return (
               <article
@@ -525,12 +1000,67 @@ export function StudioShell({
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    {connectorHealth ? (
+                      <StatusPill
+                        state={connectorHealth.state}
+                        label={connectorHealth.state}
+                      />
+                    ) : null}
                     <StatusPill state={connector.readiness} label={connector.readiness} />
                     <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-foreground/70">
                       {connector.mode}
                     </span>
                   </div>
                 </div>
+
+                {connectorHealth ? (
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-[1.75rem] border border-white/10 bg-black/18 p-4">
+                      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
+                        Runtime health
+                      </p>
+                      <p className="mt-3 text-sm leading-6 text-foreground/72">
+                        {connectorHealth.detail}
+                      </p>
+                      <p className="mt-3 text-xs uppercase tracking-[0.22em] text-foreground/45">
+                        {connectorHealth.lastActivityAt
+                          ? `laatste activiteit ${formatDutchDate(
+                              connectorHealth.lastActivityAt,
+                            )}`
+                          : "nog geen runtime-activiteit"}
+                      </p>
+                      <p className="mt-2 text-xs uppercase tracking-[0.22em] text-foreground/45">
+                        succes{" "}
+                        {connectorHealth.lastSuccessAt
+                          ? formatDutchDate(connectorHealth.lastSuccessAt)
+                          : "nog niet"}
+                        {" · "}failure{" "}
+                        {connectorHealth.lastFailureAt
+                          ? formatDutchDate(connectorHealth.lastFailureAt)
+                          : "geen"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-[1.75rem] border border-white/10 bg-black/18 p-4">
+                      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-sky-glow">
+                        Runtime signals
+                      </p>
+                      <p className="mt-3 text-sm leading-6 text-foreground/72">
+                        open jobs{" "}
+                        {connectorHealth.pendingJobs +
+                          connectorHealth.processingJobs +
+                          connectorHealth.failedJobs}
+                        {" · "}retries {connectorHealth.scheduledRetryJobs}
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-foreground/72">
+                        live {connectorHealth.liveCount}
+                        {" · "}review {connectorHealth.reviewCount}
+                        {" · "}queued {connectorHealth.queuedCount}
+                        {" · "}manual {connectorHealth.manualCount}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
 
                 <form action={saveConnectorConfig} className="mt-5 space-y-4">
                   <input type="hidden" name="tenantSlug" value={tenant.slug} />

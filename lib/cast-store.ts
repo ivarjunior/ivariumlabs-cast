@@ -8,6 +8,7 @@ import {
   type CastTenantProfile,
   type CastWorkspace,
   type DistributionJob,
+  type DistributionWorkerRuntime,
   type PlatformConnector,
   type PodcastEpisode,
   type PodcastShow,
@@ -42,6 +43,7 @@ const sanityWorkspaceProjection = `{
   queuedReleases,
   distributionJobs,
   connectors,
+  workerRuntime,
   createdAt,
   updatedAt
 }`;
@@ -61,6 +63,7 @@ type SanityCastWorkspaceDocument = {
   queuedReleases?: Array<QueuedRelease & { _key?: string }> | null;
   distributionJobs?: Array<DistributionJob & { _key?: string }> | null;
   connectors?: Array<PlatformConnector & { _key?: string }> | null;
+  workerRuntime?: DistributionWorkerRuntime | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 };
@@ -307,6 +310,7 @@ function buildWorkspaceFromSanityDocument(
       connectors: Array.isArray(document.connectors)
         ? document.connectors.map((connector) => sanitizeConnector(connector))
         : [],
+      workerRuntime: document.workerRuntime ?? undefined,
     },
   });
 
@@ -367,6 +371,7 @@ function buildSanityWorkspaceDocument(workspace: CastWorkspace) {
       _key: connector.targetId,
       ...connector,
     })),
+    workerRuntime: normalized.workerRuntime,
     createdAt: normalized.tenant.createdAt,
     updatedAt: normalized.tenant.updatedAt,
   };

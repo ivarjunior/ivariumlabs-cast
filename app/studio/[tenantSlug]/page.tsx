@@ -3,9 +3,10 @@ import {
   hasTenantAccess,
   isTenantAccessCodeFallbackEnabled,
 } from "@/lib/cast-access";
-import { getTenantWorkspace } from "@/lib/cast-store";
+import { getCastStorePersistenceStatus, getTenantWorkspace } from "@/lib/cast-store";
 import { getDistributionWorkerStatus } from "@/lib/distribution-worker";
 import { getObjectStorageStatus } from "@/lib/object-storage";
+import { getCastPlatformEntryStatus } from "@/lib/platform-entry";
 import { StudioShell } from "../page";
 import { unlockTenantStudio } from "../actions";
 
@@ -116,6 +117,8 @@ export default async function TenantStudioPage({
       workspace={workspace}
       storageStatus={getObjectStorageStatus()}
       workerStatus={getDistributionWorkerStatus()}
+      persistenceStatus={getCastStorePersistenceStatus()}
+      platformEntryStatus={getCastPlatformEntryStatus()}
     />
   );
 }

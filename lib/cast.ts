@@ -19,6 +19,12 @@ export type ConnectorReadiness = "ready" | "setup" | "disabled";
 export type YouTubePrivacyStatus = "private" | "unlisted" | "public";
 export type ClipPlatform = "shorts" | "reels" | "tiktok";
 export type ClipRenderTemplateId = "clean" | "bold" | "ticker";
+export type DistributionWorkerTrigger = "scheduler" | "manual-batch" | "manual-job";
+export type DistributionWorkerRunState =
+  | "idle"
+  | "success"
+  | "partial"
+  | "failed";
 
 export const defaultDistributionJobMaxAttempts = 3;
 
@@ -70,6 +76,32 @@ export type DistributionJobHistoryEntry = {
   nextRetryAt?: string | null;
   externalUrl?: string | null;
   externalId?: string | null;
+};
+
+export type DistributionWorkerRun = {
+  id: string;
+  trigger: DistributionWorkerTrigger;
+  state: DistributionWorkerRunState;
+  startedAt: string;
+  completedAt: string | null;
+  processedJobs: number;
+  completedJobs: number;
+  failedJobs: number;
+  jobId?: string | null;
+  note: string;
+};
+
+export type DistributionWorkerRuntime = {
+  lastRunStartedAt: string | null;
+  lastRunCompletedAt: string | null;
+  lastSuccessfulRunAt: string | null;
+  lastFailedRunAt: string | null;
+  lastTrigger: DistributionWorkerTrigger | null;
+  lastState: DistributionWorkerRunState;
+  lastProcessedJobs: number;
+  lastCompletedJobs: number;
+  lastFailedJobs: number;
+  recentRuns: DistributionWorkerRun[];
 };
 
 export type PlatformConnector = {
@@ -218,6 +250,7 @@ export type CastStore = {
   queuedReleases: QueuedRelease[];
   distributionJobs: DistributionJob[];
   connectors: PlatformConnector[];
+  workerRuntime: DistributionWorkerRuntime;
 };
 
 export type CastTenantProfile = {
@@ -237,6 +270,30 @@ export type CastWorkspace = CastStore & {
 
 export type CastRegistry = {
   tenants: CastWorkspace[];
+};
+
+export type ConnectorHealthState =
+  | "healthy"
+  | "active"
+  | "attention"
+  | "blocked"
+  | "idle";
+
+export type ConnectorHealth = {
+  targetId: string;
+  state: ConnectorHealthState;
+  detail: string;
+  lastActivityAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  pendingJobs: number;
+  processingJobs: number;
+  failedJobs: number;
+  scheduledRetryJobs: number;
+  liveCount: number;
+  reviewCount: number;
+  queuedCount: number;
+  manualCount: number;
 };
 
 export const distributionTargets: DistributionTarget[] = [
@@ -634,6 +691,7 @@ export function createEmptyCastStore(): CastStore {
     queuedReleases: [],
     distributionJobs: [],
     connectors: createDefaultConnectors(),
+    workerRuntime: createEmptyDistributionWorkerRuntime(),
   };
 }
 
@@ -760,6 +818,182 @@ export function createDistributionJobHistoryEntry(args: {
 
 function sortDistributionJobHistory(history: DistributionJobHistoryEntry[]) {
   return [...history].sort((left, right) => right.at.localeCompare(left.at));
+}
+
+function getLatestIsoTimestamp(
+  values: Array<string | null | undefined>,
+): string | null {
+  let latest: string | null = null;
+
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+
+    if (!latest || value > latest) {
+      latest = value;
+    }
+  }
+
+  return latest;
+}
+
+function buildDistributionWorkerRunId(args: {
+  trigger: DistributionWorkerTrigger;
+  startedAt: string;
+  jobId?: string | null;
+}) {
+  const id = slugify(
+    [args.trigger, args.startedAt, args.jobId ?? ""].filter(Boolean).join("-"),
+  );
+
+  return id || "distribution-worker-run";
+}
+
+function sortDistributionWorkerRuns(runs: DistributionWorkerRun[]) {
+  return [...runs].sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+}
+
+function normalizeDistributionWorkerRun(
+  run: DistributionWorkerRun,
+): DistributionWorkerRun {
+  return {
+    ...run,
+    id:
+      typeof run.id === "string" && run.id.trim()
+        ? run.id.trim()
+        : buildDistributionWorkerRunId({
+            trigger: run.trigger,
+            startedAt: run.startedAt,
+            jobId: run.jobId ?? null,
+          }),
+    completedAt: run.completedAt ?? null,
+    processedJobs: Math.max(Math.trunc(run.processedJobs ?? 0), 0),
+    completedJobs: Math.max(Math.trunc(run.completedJobs ?? 0), 0),
+    failedJobs: Math.max(Math.trunc(run.failedJobs ?? 0), 0),
+    jobId: run.jobId ?? null,
+    note: run.note ?? "",
+    state:
+      run.state === "success" || run.state === "partial" || run.state === "failed"
+        ? run.state
+        : "idle",
+  };
+}
+
+export function createEmptyDistributionWorkerRuntime(): DistributionWorkerRuntime {
+  return {
+    lastRunStartedAt: null,
+    lastRunCompletedAt: null,
+    lastSuccessfulRunAt: null,
+    lastFailedRunAt: null,
+    lastTrigger: null,
+    lastState: "idle",
+    lastProcessedJobs: 0,
+    lastCompletedJobs: 0,
+    lastFailedJobs: 0,
+    recentRuns: [],
+  };
+}
+
+function normalizeDistributionWorkerRuntime(
+  runtime: DistributionWorkerRuntime | null | undefined,
+): DistributionWorkerRuntime {
+  if (!runtime) {
+    return createEmptyDistributionWorkerRuntime();
+  }
+
+  return {
+    lastRunStartedAt: runtime.lastRunStartedAt ?? null,
+    lastRunCompletedAt: runtime.lastRunCompletedAt ?? null,
+    lastSuccessfulRunAt: runtime.lastSuccessfulRunAt ?? null,
+    lastFailedRunAt: runtime.lastFailedRunAt ?? null,
+    lastTrigger: runtime.lastTrigger ?? null,
+    lastState:
+      runtime.lastState === "success" ||
+      runtime.lastState === "partial" ||
+      runtime.lastState === "failed"
+        ? runtime.lastState
+        : "idle",
+    lastProcessedJobs: Math.max(Math.trunc(runtime.lastProcessedJobs ?? 0), 0),
+    lastCompletedJobs: Math.max(Math.trunc(runtime.lastCompletedJobs ?? 0), 0),
+    lastFailedJobs: Math.max(Math.trunc(runtime.lastFailedJobs ?? 0), 0),
+    recentRuns: sortDistributionWorkerRuns(
+      Array.isArray(runtime.recentRuns)
+        ? runtime.recentRuns.map((run) => normalizeDistributionWorkerRun(run))
+        : [],
+    ).slice(0, 6),
+  };
+}
+
+function resolveDistributionWorkerRunState(args: {
+  completedJobs: number;
+  failedJobs: number;
+}): DistributionWorkerRunState {
+  if (args.failedJobs > 0 && args.completedJobs > 0) {
+    return "partial";
+  }
+
+  if (args.failedJobs > 0) {
+    return "failed";
+  }
+
+  return "success";
+}
+
+export function finalizeDistributionWorkerRuntime(args: {
+  runtime?: DistributionWorkerRuntime | null;
+  trigger: DistributionWorkerTrigger;
+  startedAt: string;
+  completedAt: string;
+  processedJobs: number;
+  completedJobs: number;
+  failedJobs: number;
+  jobId?: string | null;
+  note: string;
+}): DistributionWorkerRuntime {
+  const currentRuntime = normalizeDistributionWorkerRuntime(args.runtime);
+  const nextState = resolveDistributionWorkerRunState({
+    completedJobs: args.completedJobs,
+    failedJobs: args.failedJobs,
+  });
+  const nextRun = normalizeDistributionWorkerRun({
+    id: buildDistributionWorkerRunId({
+      trigger: args.trigger,
+      startedAt: args.startedAt,
+      jobId: args.jobId ?? null,
+    }),
+    trigger: args.trigger,
+    state: nextState,
+    startedAt: args.startedAt,
+    completedAt: args.completedAt,
+    processedJobs: args.processedJobs,
+    completedJobs: args.completedJobs,
+    failedJobs: args.failedJobs,
+    jobId: args.jobId ?? null,
+    note: args.note,
+  });
+
+  return {
+    lastRunStartedAt: args.startedAt,
+    lastRunCompletedAt: args.completedAt,
+    lastSuccessfulRunAt:
+      nextState === "success"
+        ? args.completedAt
+        : currentRuntime.lastSuccessfulRunAt,
+    lastFailedRunAt:
+      nextState === "failed" || nextState === "partial"
+        ? args.completedAt
+        : currentRuntime.lastFailedRunAt,
+    lastTrigger: args.trigger,
+    lastState: nextState,
+    lastProcessedJobs: Math.max(Math.trunc(args.processedJobs), 0),
+    lastCompletedJobs: Math.max(Math.trunc(args.completedJobs), 0),
+    lastFailedJobs: Math.max(Math.trunc(args.failedJobs), 0),
+    recentRuns: sortDistributionWorkerRuns([
+      nextRun,
+      ...currentRuntime.recentRuns,
+    ]).slice(0, 6),
+  };
 }
 
 function normalizeDistributionJobHistoryEntry(
@@ -1111,6 +1345,7 @@ export function normalizeCastStore(store: CastStore): CastStore {
       (store.distributionJobs ?? []).map((job) => normalizeDistributionJob(job)),
     ),
     connectors: sortConnectors(mergeConnectors(store.connectors)),
+    workerRuntime: normalizeDistributionWorkerRuntime(store.workerRuntime),
   };
 }
 
@@ -1203,6 +1438,277 @@ export function getConnectorBoardStats(store: CastStore) {
     setup,
     disabled,
   };
+}
+
+function getConnectorDistributionStats(store: CastStore, targetId: string) {
+  return store.publishedEpisodes.reduce(
+    (summary, episode) => {
+      for (const item of episode.distribution) {
+        if (item.targetId !== targetId) {
+          continue;
+        }
+
+        if (item.state === "live") {
+          summary.liveCount += 1;
+        } else if (item.state === "review") {
+          summary.reviewCount += 1;
+        } else if (item.state === "queued") {
+          summary.queuedCount += 1;
+        } else {
+          summary.manualCount += 1;
+        }
+
+        summary.lastSyncedAt = getLatestIsoTimestamp([
+          summary.lastSyncedAt,
+          item.syncedAt ?? null,
+        ]);
+      }
+
+      return summary;
+    },
+    {
+      liveCount: 0,
+      reviewCount: 0,
+      queuedCount: 0,
+      manualCount: 0,
+      lastSyncedAt: null as string | null,
+    },
+  );
+}
+
+function getConnectorJobStats(store: CastStore, targetId: string) {
+  const jobs = store.distributionJobs.filter((job) => job.targetId === targetId);
+  const pendingJobs = jobs.filter((job) => job.status === "pending").length;
+  const processingJobs = jobs.filter((job) => job.status === "processing").length;
+  const failedJobs = jobs.filter((job) => job.status === "failed").length;
+  const scheduledRetryJobs = jobs.filter(
+    (job) => job.status === "failed" && Boolean(job.nextRetryAt),
+  ).length;
+  const lastSuccessAt = getLatestIsoTimestamp(
+    jobs.flatMap((job) =>
+      job.history
+        .filter((entry) => entry.event === "completed")
+        .map((entry) => entry.at),
+    ),
+  );
+  const lastFailureAt = getLatestIsoTimestamp(
+    jobs.flatMap((job) =>
+      job.history
+        .filter((entry) => entry.event === "failed")
+        .map((entry) => entry.at),
+    ),
+  );
+  const lastActivityAt = getLatestIsoTimestamp([
+    ...jobs.map((job) => job.updatedAt),
+    ...jobs.map((job) => job.lastAttemptAt ?? null),
+    lastSuccessAt,
+    lastFailureAt,
+  ]);
+
+  return {
+    jobs,
+    pendingJobs,
+    processingJobs,
+    failedJobs,
+    scheduledRetryJobs,
+    lastSuccessAt,
+    lastFailureAt,
+    lastActivityAt,
+  };
+}
+
+export function getConnectorHealth(
+  store: CastStore,
+  targetId: string,
+): ConnectorHealth {
+  const connector = getConnector(store.connectors, targetId);
+  const distributionStats = getConnectorDistributionStats(store, targetId);
+  const jobStats = getConnectorJobStats(store, targetId);
+  const lastActivityAt = getLatestIsoTimestamp([
+    distributionStats.lastSyncedAt,
+    jobStats.lastActivityAt,
+  ]);
+
+  if (!connector || connector.readiness === "disabled") {
+    return {
+      targetId,
+      state: "blocked",
+      detail: "Connector is uitgeschakeld voor deze route.",
+      lastActivityAt,
+      lastSuccessAt: jobStats.lastSuccessAt,
+      lastFailureAt: jobStats.lastFailureAt,
+      pendingJobs: jobStats.pendingJobs,
+      processingJobs: jobStats.processingJobs,
+      failedJobs: jobStats.failedJobs,
+      scheduledRetryJobs: jobStats.scheduledRetryJobs,
+      liveCount: distributionStats.liveCount,
+      reviewCount: distributionStats.reviewCount,
+      queuedCount: distributionStats.queuedCount,
+      manualCount: distributionStats.manualCount,
+    };
+  }
+
+  if (connector.readiness === "setup") {
+    return {
+      targetId,
+      state: "blocked",
+      detail: "Connector mist nog bestemming of accountconfiguratie.",
+      lastActivityAt,
+      lastSuccessAt: jobStats.lastSuccessAt,
+      lastFailureAt: jobStats.lastFailureAt,
+      pendingJobs: jobStats.pendingJobs,
+      processingJobs: jobStats.processingJobs,
+      failedJobs: jobStats.failedJobs,
+      scheduledRetryJobs: jobStats.scheduledRetryJobs,
+      liveCount: distributionStats.liveCount,
+      reviewCount: distributionStats.reviewCount,
+      queuedCount: distributionStats.queuedCount,
+      manualCount: distributionStats.manualCount,
+    };
+  }
+
+  if (
+    jobStats.processingJobs > 0 ||
+    jobStats.pendingJobs > 0 ||
+    jobStats.scheduledRetryJobs > 0
+  ) {
+    return {
+      targetId,
+      state: "active",
+      detail:
+        jobStats.scheduledRetryJobs > 0
+          ? "Worker heeft retries of open connectorjobs voor deze route."
+          : "Connector heeft nog open jobs in de distributierij.",
+      lastActivityAt,
+      lastSuccessAt: jobStats.lastSuccessAt,
+      lastFailureAt: jobStats.lastFailureAt,
+      pendingJobs: jobStats.pendingJobs,
+      processingJobs: jobStats.processingJobs,
+      failedJobs: jobStats.failedJobs,
+      scheduledRetryJobs: jobStats.scheduledRetryJobs,
+      liveCount: distributionStats.liveCount,
+      reviewCount: distributionStats.reviewCount,
+      queuedCount: distributionStats.queuedCount,
+      manualCount: distributionStats.manualCount,
+    };
+  }
+
+  if (
+    jobStats.failedJobs > 0 &&
+    (!jobStats.lastSuccessAt || Boolean(jobStats.lastFailureAt && jobStats.lastFailureAt >= jobStats.lastSuccessAt))
+  ) {
+    return {
+      targetId,
+      state: "blocked",
+      detail: "Laatste runtime voor deze connector eindigde in een fout.",
+      lastActivityAt,
+      lastSuccessAt: jobStats.lastSuccessAt,
+      lastFailureAt: jobStats.lastFailureAt,
+      pendingJobs: jobStats.pendingJobs,
+      processingJobs: jobStats.processingJobs,
+      failedJobs: jobStats.failedJobs,
+      scheduledRetryJobs: jobStats.scheduledRetryJobs,
+      liveCount: distributionStats.liveCount,
+      reviewCount: distributionStats.reviewCount,
+      queuedCount: distributionStats.queuedCount,
+      manualCount: distributionStats.manualCount,
+    };
+  }
+
+  if (
+    distributionStats.liveCount > 0 ||
+    distributionStats.reviewCount > 0 ||
+    Boolean(jobStats.lastSuccessAt)
+  ) {
+    return {
+      targetId,
+      state: "healthy",
+      detail:
+        distributionStats.liveCount > 0
+          ? "Connector heeft live distributiesignalen op gepubliceerde episodes."
+          : "Connector heeft recente succesvolle handoffs of review-signalen.",
+      lastActivityAt,
+      lastSuccessAt: jobStats.lastSuccessAt,
+      lastFailureAt: jobStats.lastFailureAt,
+      pendingJobs: jobStats.pendingJobs,
+      processingJobs: jobStats.processingJobs,
+      failedJobs: jobStats.failedJobs,
+      scheduledRetryJobs: jobStats.scheduledRetryJobs,
+      liveCount: distributionStats.liveCount,
+      reviewCount: distributionStats.reviewCount,
+      queuedCount: distributionStats.queuedCount,
+      manualCount: distributionStats.manualCount,
+    };
+  }
+
+  if (connector.mode === "manual" || distributionStats.manualCount > 0) {
+    return {
+      targetId,
+      state: "attention",
+      detail: "Deze route leunt nog op handmatige distributiestappen.",
+      lastActivityAt,
+      lastSuccessAt: jobStats.lastSuccessAt,
+      lastFailureAt: jobStats.lastFailureAt,
+      pendingJobs: jobStats.pendingJobs,
+      processingJobs: jobStats.processingJobs,
+      failedJobs: jobStats.failedJobs,
+      scheduledRetryJobs: jobStats.scheduledRetryJobs,
+      liveCount: distributionStats.liveCount,
+      reviewCount: distributionStats.reviewCount,
+      queuedCount: distributionStats.queuedCount,
+      manualCount: distributionStats.manualCount,
+    };
+  }
+
+  return {
+    targetId,
+    state: "idle",
+    detail: "Connector is klaar, maar heeft nog geen runtime-signaal in deze workspace.",
+    lastActivityAt,
+    lastSuccessAt: jobStats.lastSuccessAt,
+    lastFailureAt: jobStats.lastFailureAt,
+    pendingJobs: jobStats.pendingJobs,
+    processingJobs: jobStats.processingJobs,
+    failedJobs: jobStats.failedJobs,
+    scheduledRetryJobs: jobStats.scheduledRetryJobs,
+    liveCount: distributionStats.liveCount,
+    reviewCount: distributionStats.reviewCount,
+    queuedCount: distributionStats.queuedCount,
+    manualCount: distributionStats.manualCount,
+  };
+}
+
+export function getConnectorHealthBoard(store: CastStore) {
+  return store.connectors.map((connector) =>
+    getConnectorHealth(store, connector.targetId),
+  );
+}
+
+export function getConnectorHealthBoardStats(store: CastStore) {
+  return getConnectorHealthBoard(store).reduce(
+    (summary, item) => {
+      if (item.state === "healthy") {
+        summary.healthy += 1;
+      } else if (item.state === "active") {
+        summary.active += 1;
+      } else if (item.state === "attention") {
+        summary.attention += 1;
+      } else if (item.state === "blocked") {
+        summary.blocked += 1;
+      } else {
+        summary.idle += 1;
+      }
+
+      return summary;
+    },
+    {
+      healthy: 0,
+      active: 0,
+      attention: 0,
+      blocked: 0,
+      idle: 0,
+    },
+  );
 }
 
 export function getNextEpisodeNumber(store: CastStore) {

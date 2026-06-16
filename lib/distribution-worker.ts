@@ -3,11 +3,13 @@ import "server-only";
 import {
   appendDistributionJobHistory,
   createDistributionJobHistoryEntry,
+  finalizeDistributionWorkerRuntime,
   getConnector,
   getDistributionJobNextRetryAt,
   isDistributionJobRetryDue,
   type CastWorkspace,
   type DistributionJob,
+  type DistributionWorkerTrigger,
 } from "@/lib/cast";
 import { getTenantWorkspace, listCastTenants, saveTenantWorkspace } from "@/lib/cast-store";
 import { executeDistributionConnector } from "@/lib/distribution-connectors";
@@ -129,6 +131,65 @@ function sortRunnableJobs(jobs: DistributionJob[], now: string) {
       (job) => job.status === "pending" || isDistributionJobRetryDue(job, now),
     )
     .sort((left, right) => getJobRunAt(left).localeCompare(getJobRunAt(right)));
+}
+
+function buildWorkerRunNote(args: {
+  trigger: DistributionWorkerTrigger;
+  processedJobs: number;
+  completedJobs: number;
+  failedJobs: number;
+}) {
+  const triggerLabel =
+    args.trigger === "manual-job"
+      ? "Handmatige job-run"
+      : args.trigger === "manual-batch"
+        ? "Handmatige batch-run"
+        : "Scheduler-run";
+
+  if (args.processedJobs === 0) {
+    return `${triggerLabel} vond geen runnable jobs in deze tenant.`;
+  }
+
+  if (args.failedJobs > 0 && args.completedJobs > 0) {
+    return `${triggerLabel} verwerkte ${args.processedJobs} jobs: ${args.completedJobs} succesvol en ${args.failedJobs} gefaald.`;
+  }
+
+  if (args.failedJobs > 0) {
+    return `${triggerLabel} verwerkte ${args.processedJobs} jobs en eindigde met ${args.failedJobs} fout(en).`;
+  }
+
+  return `${triggerLabel} verwerkte ${args.processedJobs} jobs zonder fouten.`;
+}
+
+function applyWorkerRuntime(args: {
+  workspace: CastWorkspace;
+  trigger: DistributionWorkerTrigger;
+  startedAt: string;
+  completedAt: string;
+  processedJobs: number;
+  completedJobs: number;
+  failedJobs: number;
+  jobId?: string | null;
+}) {
+  return {
+    ...args.workspace,
+    workerRuntime: finalizeDistributionWorkerRuntime({
+      runtime: args.workspace.workerRuntime,
+      trigger: args.trigger,
+      startedAt: args.startedAt,
+      completedAt: args.completedAt,
+      processedJobs: args.processedJobs,
+      completedJobs: args.completedJobs,
+      failedJobs: args.failedJobs,
+      jobId: args.jobId ?? null,
+      note: buildWorkerRunNote({
+        trigger: args.trigger,
+        processedJobs: args.processedJobs,
+        completedJobs: args.completedJobs,
+        failedJobs: args.failedJobs,
+      }),
+    }),
+  } satisfies CastWorkspace;
 }
 
 async function executeJobInWorkspace(args: {
@@ -281,9 +342,11 @@ export async function runDistributionJobForTenant(args: {
   tenantSlug: string;
   jobId: string;
   origin: string | null;
+  trigger?: DistributionWorkerTrigger;
 }) {
   const tenantSlug = args.tenantSlug.trim();
   const jobId = args.jobId.trim();
+  const trigger = args.trigger ?? "manual-job";
   const workspace = await getTenantWorkspace(tenantSlug);
 
   if (!workspace) {
@@ -306,15 +369,26 @@ export async function runDistributionJobForTenant(args: {
     } satisfies DistributionJobRunResult;
   }
 
+  const startedAt = new Date().toISOString();
   const nextWorkspace = await executeJobInWorkspace({
     workspace,
     job,
     origin: args.origin,
   });
-
-  await saveTenantWorkspace(nextWorkspace);
-
+  const completedAt = new Date().toISOString();
   const nextJob = nextWorkspace.distributionJobs.find((item) => item.id === job.id);
+  const runtimeWorkspace = applyWorkerRuntime({
+    workspace: nextWorkspace,
+    trigger,
+    startedAt,
+    completedAt,
+    processedJobs: 1,
+    completedJobs: nextJob?.status === "completed" ? 1 : 0,
+    failedJobs: nextJob?.status === "failed" ? 1 : 0,
+    jobId,
+  });
+
+  await saveTenantWorkspace(runtimeWorkspace);
 
   return {
     status: "processed",
@@ -326,7 +400,7 @@ export async function runDistributionJobForTenant(args: {
     note: nextJob?.note ?? "Connector-run afgerond.",
     externalUrl: nextJob?.externalUrl ?? null,
     externalId: nextJob?.externalId ?? null,
-    workspace: nextWorkspace,
+    workspace: runtimeWorkspace,
   } satisfies DistributionJobRunResult;
 }
 
@@ -334,9 +408,11 @@ export async function processPendingDistributionJobs(args: {
   limit?: number | null;
   origin: string | null;
   tenantSlug?: string | null;
+  trigger?: DistributionWorkerTrigger;
 }): Promise<DistributionBatchResult> {
   const limit = getDistributionWorkerBatchSize(args.limit ?? null);
   const scopedTenantSlug = args.tenantSlug?.trim() || "";
+  const trigger = args.trigger ?? "scheduler";
   const targetSlugs = scopedTenantSlug
     ? [scopedTenantSlug]
     : (await listCastTenants()).map((tenant) => tenant.slug);
@@ -359,7 +435,11 @@ export async function processPendingDistributionJobs(args: {
       continue;
     }
 
+    const tenantRunStartedAt = new Date().toISOString();
     let workspaceChanged = false;
+    let tenantProcessed = 0;
+    let tenantCompleted = 0;
+    let tenantFailed = 0;
     const now = new Date().toISOString();
 
     for (const job of sortRunnableJobs(workspace.distributionJobs, now)) {
@@ -376,6 +456,9 @@ export async function processPendingDistributionJobs(args: {
 
       const nextJob = workspace.distributionJobs.find((item) => item.id === job.id);
 
+      tenantProcessed += 1;
+      tenantCompleted += nextJob?.status === "completed" ? 1 : 0;
+      tenantFailed += nextJob?.status === "failed" ? 1 : 0;
       results.processed += 1;
       results.completed += nextJob?.status === "completed" ? 1 : 0;
       results.failed += nextJob?.status === "failed" ? 1 : 0;
@@ -394,8 +477,20 @@ export async function processPendingDistributionJobs(args: {
       });
     }
 
-    if (workspaceChanged) {
-      await saveTenantWorkspace(workspace);
+    const tenantRunCompletedAt = new Date().toISOString();
+    const nextWorkspace = applyWorkerRuntime({
+      workspace,
+      trigger,
+      startedAt: tenantRunStartedAt,
+      completedAt: tenantRunCompletedAt,
+      processedJobs: tenantProcessed,
+      completedJobs: tenantCompleted,
+      failedJobs: tenantFailed,
+      jobId: null,
+    });
+
+    if (workspaceChanged || targetSlugs.length > 0) {
+      await saveTenantWorkspace(nextWorkspace);
     }
   }
 

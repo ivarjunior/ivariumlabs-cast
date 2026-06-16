@@ -955,6 +955,7 @@ export async function runDistributionJob(formData: FormData) {
     tenantSlug,
     jobId,
     origin: await getActionOrigin(),
+    trigger: "manual-job",
   });
   revalidatePath(`/studio/${tenantSlug}`);
 }
@@ -975,6 +976,7 @@ export async function runPendingDistributionQueue(formData: FormData) {
   await processPendingDistributionJobs({
     origin: await getActionOrigin(),
     tenantSlug,
+    trigger: "manual-batch",
   });
 
   revalidatePath(`/studio/${tenantSlug}`);

@@ -49,6 +49,7 @@ async function runDistributionCron(request: Request) {
     origin: url.origin,
     limit: Number.isFinite(batchInput) ? batchInput : null,
     tenantSlug: tenantSlug || null,
+    trigger: "scheduler",
   });
 
   return NextResponse.json({
